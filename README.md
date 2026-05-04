@@ -59,20 +59,12 @@ Nmap_AI/
 ## Setup
 
 ```bash
-# Create and activate a virtual environment
 python3 -m venv MyEnv
-source MyEnv/bin/activate       # macOS / Linux
-# MyEnv\Scripts\activate        # Windows
-
+source MyEnv/bin/activate
 pip install -r requirements.txt
 ```
 
-Install Nmap if you want live network scanning:
-
-```bash
-brew install nmap       # macOS
-# https://nmap.org/download.html  — Windows installer
-```
+Install [Nmap](https://nmap.org/download.html) if you want live network scanning.
 
 ---
 
@@ -89,10 +81,10 @@ python3 src/test_case_records.py
 python3 src/main.py full testcase
 
 # Run individual stages
-python3 src/main.py scan              # Scan only
-python3 src/main.py build-training    # Build training CSV from scan results
-python3 src/main.py train             # Train model from CSV
-python3 src/main.py predict           # Predict from saved model
+python3 src/main.py scan
+python3 src/main.py build-training
+python3 src/main.py train
+python3 src/main.py predict
 
 # Analyze an existing Nmap XML file offline
 python3 src/main.py analyze <path/to/scan.xml>
