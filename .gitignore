@@ -1,0 +1,17 @@
+# ── Runtime output folders ────────────────────────────────────────────────────
+# data/ and result/ are generated at runtime and may contain real IPs,
+# hostnames, and port scan data. Never commit them.
+data/
+result/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ── Virtual environment ───────────────────────────────────────────────────────
+MyEnv/
+
+# ── macOS ─────────────────────────────────────────────────────────────────────
+.DS_Store
