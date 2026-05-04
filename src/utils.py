@@ -9,6 +9,9 @@ import threading
 import time
 import pandas as pd
 from pathlib import Path
+from alerts import generate_alerts_for_row
+from explainer import generate_explanation_for_row
+from constants import PROGRESS_SPINNER_INTERVAL
 from port_intel import enrich_port, port_detail_rows
 
 # EN: Run a shell command and optionally show progress.
@@ -29,7 +32,7 @@ def run_command(cmd, show_progress=False, timeout=None):
     )
 
     progress_pattern = re.compile(r"About\s+(\d+(?:\.\d+)?)%\s+done")
-    state = {
+    scan_progress = {
         "done": False,
         "percent": None
     }
@@ -45,7 +48,7 @@ def run_command(cmd, show_progress=False, timeout=None):
             match = progress_pattern.search(line)
             if match:
                 try:
-                    state["percent"] = int(float(match.group(1)))
+                    scan_progress["percent"] = int(float(match.group(1)))
                 except Exception:
                     pass
 
@@ -53,17 +56,17 @@ def run_command(cmd, show_progress=False, timeout=None):
     # VI: Hiện vòng quay hoặc phần trăm khi chờ.
     def display_progress():
         spinner = ["|", "/", "-", "\\"]
-        idx = 0
+        spinner_index = 0
 
-        while not state["done"]:
-            if state["percent"] is not None:
-                sys.stdout.write(f"\rScan progressing... {state['percent']:3d}%")
+        while not scan_progress["done"]:
+            if scan_progress["percent"] is not None:
+                sys.stdout.write(f"\rScan progressing... {scan_progress['percent']:3d}%")
             else:
-                sys.stdout.write(f"\rScan progressing... {spinner[idx % 4]}")
-                idx += 1
+                sys.stdout.write(f"\rScan progressing... {spinner[spinner_index % 4]}")
+                spinner_index += 1
 
             sys.stdout.flush()
-            time.sleep(0.15)
+            time.sleep(PROGRESS_SPINNER_INTERVAL)
 
         sys.stdout.write("\r" + " " * 50 + "\r")
         sys.stdout.flush()
@@ -83,7 +86,7 @@ def run_command(cmd, show_progress=False, timeout=None):
         except Exception:
             process.kill()
 
-        state["done"] = True
+        scan_progress["done"] = True
         stderr_thread.join()
         display_thread.join()
 
@@ -98,7 +101,7 @@ def run_command(cmd, show_progress=False, timeout=None):
         except Exception:
             process.kill()
 
-        state["done"] = True
+        scan_progress["done"] = True
         stderr_thread.join()
         display_thread.join()
 
@@ -319,9 +322,26 @@ def dataframe_to_prediction_text(df):
             lines.append(f"[{i}] IP: {row['ip']}\n")
             lines.append(f"Hostname: {row['hostname']}\n")
             lines.append(f"Severity: {sev}\n")
+            risk_score = row.get("risk_score", round(row["predicted_probability_suspicious"] * 100, 1))
+            lines.append(f"Risk Score: {risk_score}/100\n")
             lines.append(f"Probability: {row['predicted_probability_suspicious']:.3f}\n\n")
             if "top_risk_ports" in row:
                 lines.append(f"Top Risk Ports: {row['top_risk_ports']}\n\n")
+
+            explanation_lines = generate_explanation_for_row(row)
+            if explanation_lines:
+                lines.append("Why flagged:\n")
+                for explanation_line in explanation_lines:
+                    lines.append(f"  {explanation_line}\n")
+                lines.append("\n")
+
+            host_alerts = generate_alerts_for_row(row)
+            if host_alerts:
+                lines.append("Security Alerts:\n")
+                for alert in host_alerts:
+                    lines.append(f"  [{alert['severity']}] {alert['title']}\n")
+                    lines.append(f"    {alert['message']}\n")
+                lines.append("\n")
 
             lines.append("Recommendations:\n")
             recs = row["recommendations"].split(";")

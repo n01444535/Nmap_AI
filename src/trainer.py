@@ -8,6 +8,11 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score, precision_score, recall_score
 from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeClassifier
+from constants import (
+    MIN_SAMPLES_TO_TRAIN, MIN_SAMPLES_FOR_STRATIFY, MIN_SAMPLES_FOR_LR,
+    SMALL_DATASET_ROW_LIMIT, TEST_SPLIT_SMALL_DATASET, TEST_SPLIT_NORMAL_DATASET,
+    DT_MAX_DEPTH, DT_MIN_SAMPLES_SPLIT, DT_MIN_SAMPLES_LEAF,
+)
 from features import feature_columns
 
 # EN: Read model internals and rank the most useful learning signals.
@@ -25,19 +30,19 @@ def get_feature_importance_rows(bundle, top_n=20):
     # EN: Tree models already tell us how much each feature helped.
     # VI: Mô hình cây tự nói dấu hiệu nào giúp nhiều hay ít.
     if hasattr(model, "feature_importances_"):
-        scores = model.feature_importances_
-        for feature, score in zip(features, scores):
-            rows.append((feature, float(score), "tree_importance"))
+        importance_values = model.feature_importances_
+        for feature, importance_value in zip(features, importance_values):
+            rows.append((feature, float(importance_value), "tree_importance"))
     # EN: Linear models use coefficient size as a simple importance score.
     # VI: Mô hình đường thẳng dùng độ lớn hệ số làm điểm quan trọng.
     elif hasattr(model, "coef_"):
-        coefs = model.coef_[0]
-        for feature, coef in zip(features, coefs):
-            rows.append((feature, abs(float(coef)), "absolute_coefficient"))
+        coefficients = model.coef_[0]
+        for feature, coefficient in zip(features, coefficients):
+            rows.append((feature, abs(float(coefficient)), "absolute_coefficient"))
 
     # EN: Put the biggest learning signals at the top of the report.
     # VI: Đưa dấu hiệu quan trọng nhất lên đầu báo cáo.
-    rows.sort(key=lambda item: item[1], reverse=True)
+    rows.sort(key=lambda importance_row: importance_row[1], reverse=True)
     return rows[:top_n]
 
 # EN: Write the feature importance report so people can see what the AI used.
@@ -71,7 +76,7 @@ def train_models(train_csv, output_model):
     if "label" not in df.columns:
         return None, "Training CSV must contain a label column.\n"
 
-    if len(df) < 2:
+    if len(df) < MIN_SAMPLES_TO_TRAIN:
         return None, "Not enough samples to train machine learning models.\n"
 
     if df["label"].nunique() < 2:
@@ -81,10 +86,10 @@ def train_models(train_csv, output_model):
     X = df[X_cols]
     y = df["label"].astype(str)
 
-    use_stratify = y.value_counts().min() >= 2
+    use_stratify = y.value_counts().min() >= MIN_SAMPLES_FOR_STRATIFY
     stratify_value = y if use_stratify else None
 
-    test_size = 0.5 if len(df) <= 3 else 0.3
+    test_size = TEST_SPLIT_SMALL_DATASET if len(df) <= SMALL_DATASET_ROW_LIMIT else TEST_SPLIT_NORMAL_DATASET
 
     try:
         X_train, X_test, y_train, y_test = train_test_split(
@@ -105,13 +110,13 @@ def train_models(train_csv, output_model):
 
     candidate_models = []
 
-    if len(df) >= 4:
+    if len(df) >= MIN_SAMPLES_FOR_LR:
         candidate_models.append(
             ("logistic_regression", LogisticRegression(max_iter=2000, class_weight="balanced"))
         )
 
     candidate_models.append(
-        ("decision_tree", DecisionTreeClassifier(max_depth=6, min_samples_split=2, min_samples_leaf=1, class_weight="balanced", random_state=42))
+        ("decision_tree", DecisionTreeClassifier(max_depth=DT_MAX_DEPTH, min_samples_split=DT_MIN_SAMPLES_SPLIT, min_samples_leaf=DT_MIN_SAMPLES_LEAF, class_weight="balanced", random_state=42))
     )
 
     results = {}

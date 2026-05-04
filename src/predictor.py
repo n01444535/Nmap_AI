@@ -3,6 +3,8 @@
 
 import joblib
 import pandas as pd
+from constants import SEVERITY_CRITICAL_MIN_PROB, SEVERITY_HIGH_MIN_PROB, SEVERITY_MEDIUM_MIN_PROB
+from alerts import generate_alerts_for_row, alerts_to_summary_string
 from features import records_to_dataframe
 from port_intel import risky_ports_from_record
 from recommender import recommend_for_row
@@ -14,12 +16,12 @@ def load_model_bundle(model_path):
 
 # EN: Turn a probability number into a severity word.
 # VI: Đổi số xác suất thành chữ mức nguy hiểm.
-def severity_from_probability(p):
-    if p > 0.98:
+def severity_from_probability(suspicious_probability):
+    if suspicious_probability > SEVERITY_CRITICAL_MIN_PROB:
         return "CRITICAL"
-    if p > 0.95:
+    if suspicious_probability > SEVERITY_HIGH_MIN_PROB:
         return "HIGH"
-    if p > 0.85:
+    if suspicious_probability > SEVERITY_MEDIUM_MIN_PROB:
         return "MEDIUM"
     return "LOW"
 
@@ -57,8 +59,12 @@ def predict_from_records(records, model_path, output_csv=None):
         df["predicted_probability_suspicious"] = 0.0
 
     df["severity"] = df["predicted_probability_suspicious"].apply(severity_from_probability)
+    df["risk_score"] = (df["predicted_probability_suspicious"] * 100).round(1)
     df["top_risk_ports"] = [risky_ports_from_record(record) for record in records]
     df["recommendations"] = df.apply(lambda row: " ; ".join(recommend_for_row(row)), axis=1)
+    df["alerts"] = df.apply(
+        lambda row: alerts_to_summary_string(generate_alerts_for_row(row)), axis=1
+    )
 
     export_df = df[
         [
@@ -66,6 +72,7 @@ def predict_from_records(records, model_path, output_csv=None):
             "hostname",
             "prediction",
             "predicted_probability_suspicious",
+            "risk_score",
             "severity",
             "open_port_count",
             "risky_port_count",
@@ -78,6 +85,7 @@ def predict_from_records(records, model_path, output_csv=None):
             "fileshare_count",
             "remote_access_count",
             "top_risk_ports",
+            "alerts",
             "recommendations"
         ]
     ].copy()

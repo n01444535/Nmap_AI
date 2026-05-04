@@ -3,7 +3,7 @@
 
 from collections import Counter
 import pandas as pd
-from constants import COMMON_WEB_PORTS, DB_PORTS, FILESHARE_PORTS, HIGH_RISK_PORTS, MAIL_PORTS, REMOTE_ACCESS_PORTS, VERY_HIGH_RISK_PORTS
+from constants import COMMON_WEB_PORTS, DB_PORTS, FILESHARE_PORTS, HIGH_RISK_PORTS, MAIL_PORTS, REMOTE_ACCESS_PORTS, VERY_HIGH_RISK_PORTS, UNCOMMON_PORT_MIN, CRITICAL_RISK_SCORE_MIN, HIGH_RISK_SCORE_MIN
 from port_intel import ADMIN_PORTS, CLEARTEXT_PORTS, IOT_PORTS, get_port_profile
 
 # EN: Put a service name into an easy group.
@@ -32,30 +32,30 @@ def service_bucket(service_name):
 # VI: Đếm dấu hiệu quan trọng từ một máy đã quét.
 def extract_features_from_host_record(record):
     open_ports = record["open_ports"]
-    ports = [p["port"] for p in open_ports]
-    services = [p.get("service", "") for p in open_ports]
+    ports = [port_entry["port"] for port_entry in open_ports]
+    services = [port_entry.get("service", "") for port_entry in open_ports]
     port_set = set(ports)
-    buckets = Counter(service_bucket(s) for s in services)
-    profiles = [get_port_profile(p.get("port", 0), p.get("service", "")) for p in open_ports]
+    buckets = Counter(service_bucket(service_name) for service_name in services)
+    profiles = [get_port_profile(port_entry.get("port", 0), port_entry.get("service", "")) for port_entry in open_ports]
     profile_categories = Counter(profile["category"] for profile in profiles)
     risk_scores = [profile["risk_score"] for profile in profiles]
-    risky_count = sum(1 for p in ports if p in HIGH_RISK_PORTS)
-    very_risky_count = sum(1 for p in ports if p in VERY_HIGH_RISK_PORTS)
-    uncommon_open_count = sum(1 for p in ports if p > 1024 and p not in {1433, 1521, 1883, 2049, 2375, 2376, 27017, 3306, 3389, 5432, 5601, 5900, 5985, 5986, 6379, 6443, 8080, 8443, 9000, 9200, 11211})
-    remote_access_count = sum(1 for p in ports if p in REMOTE_ACCESS_PORTS)
-    mail_count = sum(1 for p in ports if p in MAIL_PORTS)
-    db_count = sum(1 for p in ports if p in DB_PORTS)
-    fileshare_count = sum(1 for p in ports if p in FILESHARE_PORTS)
-    web_count = sum(1 for p in ports if p in COMMON_WEB_PORTS)
-    cleartext_count = sum(1 for p in ports if p in CLEARTEXT_PORTS)
-    admin_port_count = sum(1 for p in ports if p in ADMIN_PORTS)
-    iot_port_count = sum(1 for p in ports if p in IOT_PORTS)
-    critical_profile_count = sum(1 for score in risk_scores if score >= 4)
-    high_profile_count = sum(1 for score in risk_scores if score >= 3)
-    nse_script_count = sum(len(p.get("scripts", [])) for p in open_ports)
-    versioned_service_count = sum(1 for p in open_ports if p.get("product", "") or p.get("version", ""))
-    unknown_service_count = sum(1 for s in services if not s or s == "unknown")
-    encrypted_service_count = sum(1 for p in open_ports if p.get("tunnel", "") == "ssl" or p.get("port") in {443, 465, 993, 995, 8443, 5986})
+    risky_count = sum(1 for port_number in ports if port_number in HIGH_RISK_PORTS)
+    very_risky_count = sum(1 for port_number in ports if port_number in VERY_HIGH_RISK_PORTS)
+    uncommon_open_count = sum(1 for port_number in ports if port_number > UNCOMMON_PORT_MIN and port_number not in {1433, 1521, 1883, 2049, 2375, 2376, 27017, 3306, 3389, 5432, 5601, 5900, 5985, 5986, 6379, 6443, 8080, 8443, 9000, 9200, 11211})
+    remote_access_count = sum(1 for port_number in ports if port_number in REMOTE_ACCESS_PORTS)
+    mail_count = sum(1 for port_number in ports if port_number in MAIL_PORTS)
+    db_count = sum(1 for port_number in ports if port_number in DB_PORTS)
+    fileshare_count = sum(1 for port_number in ports if port_number in FILESHARE_PORTS)
+    web_count = sum(1 for port_number in ports if port_number in COMMON_WEB_PORTS)
+    cleartext_count = sum(1 for port_number in ports if port_number in CLEARTEXT_PORTS)
+    admin_port_count = sum(1 for port_number in ports if port_number in ADMIN_PORTS)
+    iot_port_count = sum(1 for port_number in ports if port_number in IOT_PORTS)
+    critical_profile_count = sum(1 for port_risk_score in risk_scores if port_risk_score >= CRITICAL_RISK_SCORE_MIN)
+    high_profile_count = sum(1 for port_risk_score in risk_scores if port_risk_score >= HIGH_RISK_SCORE_MIN)
+    nse_script_count = sum(len(port_entry.get("scripts", [])) for port_entry in open_ports)
+    versioned_service_count = sum(1 for port_entry in open_ports if port_entry.get("product", "") or port_entry.get("version", ""))
+    unknown_service_count = sum(1 for service_name in services if not service_name or service_name == "unknown")
+    encrypted_service_count = sum(1 for port_entry in open_ports if port_entry.get("tunnel", "") == "ssl" or port_entry.get("port") in {443, 465, 993, 995, 8443, 5986})
     max_port_risk_score = max(risk_scores) if risk_scores else 0
     avg_port_risk_score = sum(risk_scores) / len(risk_scores) if risk_scores else 0
     return {

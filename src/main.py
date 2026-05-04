@@ -33,6 +33,7 @@ def load_pandas_or_project_venv():
 
 pd = load_pandas_or_project_venv()
 
+from alerts import generate_alerts_for_row
 from local_target import get_local_ip
 from parser_nmap import extract_live_hosts_from_discovery, parse_nmap_service_scan
 from predictor import predict_from_records
@@ -400,16 +401,22 @@ def print_suspicious_summary(df):
         severity = severity_from_probability(probability)
 
         print(f"[{i}] {row['ip']} ({row['hostname']})")
-        print(f"AI Severity: {severity} | AI Confidence: {probability:.3f}")
-        print(f"Top Risk Ports: {row.get('top_risk_ports', 'None')}")
-        print("AI Recommendations:")
+        risk_score = row.get("risk_score", round(probability * 100, 1))
+        print(f"    Severity : {severity} | Risk Score : {risk_score}/100 | Confidence : {probability:.3f}")
+        print(f"    Ports    : {row.get('top_risk_ports', 'None')}")
 
-        recommendations = str(row["recommendations"]).split(";")
-        for recommendation in recommendations:
-            recommendation = recommendation.strip()
-            if recommendation:
-                print(f" - {recommendation}")
+        host_alerts = generate_alerts_for_row(row)
+        if host_alerts:
+            top_alerts = host_alerts[:3]
+            print(f"    Alerts   : {len(host_alerts)} triggered", end="")
+            if len(host_alerts) > 3:
+                print(f" (top {len(top_alerts)} shown)")
+            else:
+                print()
+            for alert in top_alerts:
+                print(f"      [{alert['severity']}] {alert['title']}")
 
+        print(f"    → Full explanation: result/prediction_result.txt")
         print("-" * 58)
 
     print("\n==========================================================\n")

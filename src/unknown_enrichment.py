@@ -3,6 +3,12 @@
 
 from pathlib import Path
 
+from constants import (
+    EPHEMERAL_PORT_MIN, MEDIA_SERVICE_PORTS, UNCOMMON_PORT_MIN,
+    CONFIDENCE_NO_INFO, CONFIDENCE_EPHEMERAL_PORT, CONFIDENCE_MACOS_DYNAMIC,
+    CONFIDENCE_APPLE_CONTINUITY, CONFIDENCE_MEDIA_STREAMING, CONFIDENCE_MEDIA_DYNAMIC,
+    CONFIDENCE_PRINTER, CONFIDENCE_WEB_ADMIN, CONFIDENCE_MAX,
+)
 from parser_nmap import parse_nmap_service_scan
 from scanner import run_unknown_port_scan
 
@@ -72,21 +78,21 @@ def collect_unknown_ports_by_host(records, only_missing_enrichment=True):
 # EN: Join script text so guessing can read it.
 # VI: Ghép chữ script để phần đoán đọc được.
 def script_text(port_info):
-    values = []
+    script_tokens = []
     for script in port_info.get("scripts", []) or []:
-        values.append(script.get("id", ""))
-        values.append(script.get("output", ""))
-    return " ".join(values).lower()
+        script_tokens.append(script.get("id", ""))
+        script_tokens.append(script.get("output", ""))
+    return " ".join(script_tokens).lower()
 
 
 # EN: Collect host clues into one text.
 # VI: Gom manh mối của máy vào một đoạn chữ.
 def host_context_text(record):
-    parts = [record.get("hostname", ""), record.get("vendor", "")]
+    context_tokens = [record.get("hostname", ""), record.get("vendor", "")]
     for os_match in record.get("os_matches", []) or []:
-        parts.append(os_match.get("name", ""))
+        context_tokens.append(os_match.get("name", ""))
     for port_info in record.get("open_ports", []):
-        parts.extend(
+        context_tokens.extend(
             [
                 port_info.get("service", ""),
                 port_info.get("product", ""),
@@ -95,7 +101,7 @@ def host_context_text(record):
                 script_text(port_info),
             ]
         )
-    return " ".join(parts).lower()
+    return " ".join(context_tokens).lower()
 
 
 # EN: Guess the service and device for an unnamed port.
@@ -109,7 +115,7 @@ def guess_unknown_port(record, port_info):
     evidence = []
     service_guess = "unknown-service"
     device_guess = "unknown device"
-    confidence = 0.15
+    confidence = CONFIDENCE_NO_INFO
 
     apple_indicators = ["mac", "macbook", "mbp", "imac", "iphone", "ipad", "apple", "airtunes", "airplay", "eppc"]
     has_apple = any(token in context for token in apple_indicators) or 3031 in open_ports or "eppc" in services
@@ -117,40 +123,40 @@ def guess_unknown_port(record, port_info):
     has_printer = any(token in context for token in ["printer", "cups", "ipp"]) or 631 in open_ports
     has_web_admin = bool(open_ports & {80, 443, 5000, 5601, 8080, 8443, 9000})
 
-    if port >= 49152:
+    if port >= EPHEMERAL_PORT_MIN:
         service_guess = "ephemeral-local-service"
-        confidence = 0.35
+        confidence = CONFIDENCE_EPHEMERAL_PORT
         evidence.append("port is in the dynamic/private range 49152-65535")
 
     if has_apple:
         device_guess = "Apple/macOS device"
         evidence.append("host has Apple/macOS indicators from hostname, services, or scripts")
-        if port >= 49152:
+        if port >= EPHEMERAL_PORT_MIN:
             service_guess = "macos-dynamic-service"
-            confidence = max(confidence, 0.70)
+            confidence = max(confidence, CONFIDENCE_MACOS_DYNAMIC)
         elif has_media:
             service_guess = "apple-continuity"
-            confidence = max(confidence, 0.65)
+            confidence = max(confidence, CONFIDENCE_APPLE_CONTINUITY)
 
     if has_media and not has_apple:
         device_guess = "camera/IoT/media device"
         evidence.append("neighboring services or scripts include RTSP, AirTunes, UPnP, or camera-like signals")
-        if port in {554, 5000, 7000}:
+        if port in MEDIA_SERVICE_PORTS:
             service_guess = "media-streaming-service"
-            confidence = max(confidence, 0.60)
-        elif port >= 49152:
+            confidence = max(confidence, CONFIDENCE_MEDIA_STREAMING)
+        elif port >= EPHEMERAL_PORT_MIN:
             service_guess = "media-device-dynamic-service"
-            confidence = max(confidence, 0.50)
+            confidence = max(confidence, CONFIDENCE_MEDIA_DYNAMIC)
 
     if has_printer and not has_apple and not has_media:
         device_guess = "printer"
-        service_guess = "printer-related-service" if port >= 1024 else service_guess
-        confidence = max(confidence, 0.55)
+        service_guess = "printer-related-service" if port >= UNCOMMON_PORT_MIN else service_guess
+        confidence = max(confidence, CONFIDENCE_PRINTER)
         evidence.append("host has printer or IPP/CUPS indicators")
 
     if device_guess == "unknown device" and has_web_admin:
         device_guess = "network appliance or web-managed device"
-        confidence = max(confidence, 0.30)
+        confidence = max(confidence, CONFIDENCE_WEB_ADMIN)
         evidence.append("host exposes common web or admin ports")
 
     if not evidence:
@@ -160,7 +166,7 @@ def guess_unknown_port(record, port_info):
         "service_source": "guess",
         "service_guess": service_guess,
         "device_guess": device_guess,
-        "guess_confidence": round(min(confidence, 0.95), 2),
+        "guess_confidence": round(min(confidence, CONFIDENCE_MAX), 2),
         "guess_evidence": "; ".join(evidence),
     }
 

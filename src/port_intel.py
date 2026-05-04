@@ -1,6 +1,8 @@
 # EN: Explain ports, risks, and guessed device details.
 # VI: Giải thích cổng, mức nguy hiểm, và đoán loại thiết bị.
 
+from constants import SCRIPT_OUTPUT_MAX_LENGTH
+
 PORT_PROFILES = {
     20: ("ftp-data", "file_transfer", "medium", "FTP data channel can expose file transfers.", "Disable FTP when possible or restrict it to trusted networks."),
     21: ("ftp", "file_transfer", "high", "Plain FTP often sends credentials and data without encryption.", "Replace FTP with SFTP/FTPS or restrict access behind VPN."),
@@ -143,8 +145,8 @@ def summarize_scripts(scripts, limit=3):
     for script in scripts or []:
         script_id = script.get("id", "script")
         output = " ".join((script.get("output") or "").split())
-        if len(output) > 140:
-            output = output[:137] + "..."
+        if len(output) > SCRIPT_OUTPUT_MAX_LENGTH:
+            output = output[:SCRIPT_OUTPUT_MAX_LENGTH - 3] + "..."
         parts.append(f"{script_id}: {output}" if output else script_id)
         if len(parts) >= limit:
             break
