@@ -35,6 +35,7 @@ pd = load_pandas_or_project_venv()
 
 from alerts import generate_alerts_for_row
 from baseline import compare_to_baseline, save_baseline
+from config_loader import apply_config_to_records, load_config, override_trusted_predictions
 from local_target import get_local_ip
 from parser_nmap import extract_live_hosts_from_discovery, parse_nmap_service_scan
 from predictor import predict_from_records
@@ -538,6 +539,9 @@ def command_generate_dataset():
 # VI: Quét rồi dùng mô hình đã lưu để đoán rủi ro.
 def command_predict():
     result_dir, _, records, _ = collect_records()
+    config = load_config()
+    records = apply_config_to_records(records, config)
+
     model_path = str(result_dir / "best_model.joblib")
     output_csv = str(result_dir / "predictions.csv")
     output_txt = str(result_dir / "prediction_result.txt")
@@ -546,6 +550,7 @@ def command_predict():
     baseline_diff = compare_to_baseline(records, baseline_path)
     write_port_details(records, str(result_dir / "port_details.csv"), str(result_dir / "port_details.txt"))
     df = predict_from_records(records, model_path, output_csv)
+    df = override_trusted_predictions(df, config)
     write_txt(dataframe_to_prediction_text(df, baseline_diff=baseline_diff), output_txt)
     save_baseline(records, baseline_path)
     print_suspicious_summary(df)
@@ -625,9 +630,12 @@ def command_analyze(xml_path):
         print("Offline XML analysis finished. Model training was skipped.\n")
         return
 
+    config = load_config()
+    records = apply_config_to_records(records, config)
     baseline_path = str(result_dir / "baseline.json")
     baseline_diff = compare_to_baseline(records, baseline_path)
     pred_df = predict_from_records(records, output_model, output_csv)
+    pred_df = override_trusted_predictions(pred_df, config)
     write_txt(dataframe_to_prediction_text(pred_df, baseline_diff=baseline_diff), output_txt)
     save_baseline(records, baseline_path)
     snapshot_path = save_full_result_snapshot(
@@ -668,6 +676,9 @@ def command_full(mode="real", force_rescan=False, skip_unknown_enrich=False):
         write_txt(records_to_scan_text(records), str(result_dir / "scan_result.txt"))
     else:
         _, _, records, scan_meta = collect_records(force_rescan=force_rescan)
+
+    config = load_config()
+    records = apply_config_to_records(records, config)
 
     allow_unknown_nmap = mode == "real" and scan_meta.get("source") in {"nmap", "cache"} and has_nmap()
     records, unknown_enrich_meta = enrich_unknown_ports(
@@ -739,6 +750,7 @@ def command_full(mode="real", force_rescan=False, skip_unknown_enrich=False):
         return
 
     pred_df = predict_from_records(records, output_model, output_csv)
+    pred_df = override_trusted_predictions(pred_df, config)
     write_txt(dataframe_to_prediction_text(pred_df, baseline_diff=baseline_diff), output_txt)
     save_baseline(records, baseline_path)
     snapshot_path = save_full_result_snapshot(

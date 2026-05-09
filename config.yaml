@@ -1,0 +1,17 @@
+# Nmap_AI — Scanner Configuration
+#
+# trusted_hosts: IPs that will never be flagged as suspicious.
+#   Use for known-good hosts: routers, admin servers, your own machine.
+#
+# ignore_ports: Port numbers excluded from risk scoring on every host.
+#   Use for ports you intentionally leave open everywhere (e.g. SSH on all servers).
+#
+# Uncomment and edit entries as needed. Empty lists = no overrides applied.
+
+trusted_hosts: []
+#  - 192.168.1.1        # router / default gateway
+#  - 192.168.1.250      # known admin server
+
+ignore_ports: []
+#  - 22                 # SSH intentionally open on all servers
+#  - 80                 # HTTP expected on all web hosts

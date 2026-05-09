@@ -56,6 +56,7 @@ The goal is to close the gap between raw scan data and actionable SOC workflow.
 - **Dangerous Combination Detection** — flags high-risk port pairs (e.g. SMB + RDP = classic ransomware path, Redis + Docker API = cache-to-container pivot)
 - **Per-Host Recommendations** — actionable remediation steps for every exposed service
 - **Feature Importance Report** — which features drove the model's decisions
+- **config.yaml Overrides** — user-defined `trusted_hosts` (never flagged) and `ignore_ports` (excluded from risk scoring) to eliminate false positives on known-good infrastructure
 
 ### Infrastructure
 - SHA-256 keyed scan cache — avoids redundant Nmap scans
@@ -72,7 +73,7 @@ The goal is to close the gap between raw scan data and actionable SOC workflow.
 Nmap_AI/
 ├── src/
 │   ├── main.py                # CLI entry point — all commands dispatched here
-│   ├── scanner.py             # Nmap subprocess wrapper (discovery + service + unknown pass)
+│   ├── scanner.py             # Nmap subprocess wrapper (two-phase: fast port + targeted service)
 │   ├── parser_nmap.py         # Nmap XML → structured host records
 │   ├── features.py            # Feature engineering → DataFrame (~60 columns per host)
 │   ├── labeling.py            # Heuristic rule-based label assignment (normal/suspicious)
@@ -81,6 +82,7 @@ Nmap_AI/
 │   ├── triage.py              # SOC triage engine: Immediate Action / Investigate / Monitor
 │   ├── asset_profiler.py      # Device fingerprinting: server, workstation, container_host…
 │   ├── baseline.py            # Baseline save/load/compare for change detection
+│   ├── config_loader.py       # Loads config.yaml — trusted hosts, ignored ports overrides
 │   ├── alerts.py              # 25+ named alert rules (CRITICAL/HIGH/MEDIUM/LOW)
 │   ├── explainer.py           # Explanation: services, combos, exposure patterns, MITRE ATT&CK
 │   ├── recommender.py         # Per-host security recommendations
@@ -93,6 +95,7 @@ Nmap_AI/
 │   ├── local_target.py        # Detects local machine IP via UDP socket
 │   ├── constants.py           # All numeric constants: port sets, thresholds, model params
 │   └── utils.py               # Shared utilities, report formatters, baseline diff display
+├── config.yaml                # User overrides: trusted_hosts, ignore_ports
 ├── requirements.txt
 └── .gitignore
 ```
