@@ -2,7 +2,7 @@
 
 > Automated network scanning → feature engineering → ML classification → structured triage → MITRE ATT&CK-mapped explanations → full security report.
 
-Built as a course project (CAP4630) that grew into a functional SOC analyst assistant. The pipeline runs end-to-end with no manual steps: scan a network, train a model on the results, and receive prioritized, explainable threat reports.
+A personal research project built from self-study in network security and machine learning. The pipeline runs end-to-end with no manual steps: scan a network, train a model on the results, and receive prioritized, explainable threat reports.
 
 ---
 
