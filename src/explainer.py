@@ -30,11 +30,12 @@ _SERVICE_MAP = [
     ("has_nfs",           [2049],       "NFS",             "network file system — file access if exports are too broad"),
 ]
 
-# EN: Map each attack technique to the feature flags that enable it.
-# VI: Ánh xạ từng kỹ thuật tấn công sang các cờ đặc điểm kích hoạt nó.
+# EN: Map each MITRE ATT&CK technique to its ID, description, and enabling flags.
+# VI: Ánh xạ từng kỹ thuật MITRE ATT&CK sang ID, mô tả, và cờ kích hoạt.
 _TECHNIQUE_MAP = [
     (
         "Brute Force",
+        "T1110",
         "attacker repeatedly tries credentials to gain unauthorized access",
         [
             ("has_ssh",        [22],         "SSH"),
@@ -53,6 +54,7 @@ _TECHNIQUE_MAP = [
     ),
     (
         "Lateral Movement",
+        "TA0008",
         "attacker moves through the network after initial compromise",
         [
             ("has_smb",            [445],        "SMB"),
@@ -68,6 +70,7 @@ _TECHNIQUE_MAP = [
     ),
     (
         "Reconnaissance",
+        "T1046",
         "attacker probes services to map the network and gather intelligence",
         [
             ("has_snmp",          [161],        "SNMP"),
@@ -81,6 +84,17 @@ _TECHNIQUE_MAP = [
             ("has_elasticsearch", [9200],       "Elasticsearch"),
             ("has_redis",         [6379],       "Redis"),
             ("has_mongodb",       [27017],      "MongoDB"),
+        ],
+    ),
+    (
+        "Data Exfiltration",
+        "TA0010",
+        "attacker transfers data out through available unmonitored channels",
+        [
+            ("has_ftp",  [21],  "FTP"),
+            ("has_dns",  [53],  "DNS"),
+            ("has_smtp", [25],  "SMTP"),
+            ("has_nfs",  [2049],"NFS"),
         ],
     ),
 ]
@@ -218,22 +232,22 @@ def generate_explanation_for_row(row):
             lines.append(f"  • {pattern_text}")
 
     technique_hits = []
-    for technique_name, technique_desc, flag_entries in _TECHNIQUE_MAP:
+    for technique_name, mitre_id, technique_desc, flag_entries in _TECHNIQUE_MAP:
         matched = []
         for flag, ports, service_name in flag_entries:
             if row.get(flag, 0) == 1:
                 port_str = "/".join(str(p) for p in ports)
                 matched.append(f"{service_name} ({port_str})")
         if matched:
-            technique_hits.append((technique_name, technique_desc, matched))
+            technique_hits.append((technique_name, mitre_id, technique_desc, matched))
 
     if technique_hits:
         lines.append("")
-        lines.append("Real-world attack mapping:")
-        for technique_name, technique_desc, matched in technique_hits:
+        lines.append("MITRE ATT&CK mapping:")
+        for technique_name, mitre_id, technique_desc, matched in technique_hits:
             services_str = ", ".join(matched)
-            lines.append(f"  • {technique_name:<20}  {services_str}")
-            lines.append(f"    {'':20}  ↳ {technique_desc}")
+            lines.append(f"  • [{mitre_id}] {technique_name:<20}  {services_str}")
+            lines.append(f"    {'':28}  ↳ {technique_desc}")
 
     total_ports = row.get("open_port_count", 0)
     risky_ports = row.get("risky_port_count", 0)

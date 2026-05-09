@@ -1,34 +1,68 @@
-# Nmap_AI — Network Host Risk Classifier
+# Nmap_AI — SOC-Grade Network Host Risk Classifier
 
-A command-line tool that combines **Nmap network scanning** with **machine learning** to automatically detect suspicious hosts on a local network. The pipeline runs end-to-end: scan → feature engineering → model training → risk prediction → alert generation → detailed report.
+> Automated network scanning → feature engineering → ML classification → structured triage → MITRE ATT&CK-mapped explanations → full security report.
+
+Built as a course project (CAP4630) that grew into a functional SOC analyst assistant. The pipeline runs end-to-end with no manual steps: scan a network, train a model on the results, and receive prioritized, explainable threat reports.
+
+---
+
+## Why This Matters for SOC Analysts
+
+Traditional port scanners return raw data. This tool turns that data into **analyst-ready triage**:
+
+- Instead of "port 445 is open" → `[CRITICAL] High Risk Port Detected: SMB — primary vector for ransomware and lateral movement`
+- Instead of "host is suspicious" → `Triage: Immediate Action ↳ Isolate or block the host and begin incident response now`
+- Instead of a list of flags → a MITRE ATT&CK-mapped explanation of which techniques the host enables
+
+The goal is to close the gap between raw scan data and actionable SOC workflow.
 
 ---
 
 ## Tech Stack
 
-- **Python 3.11+**
-- **scikit-learn** — Logistic Regression, Decision Tree, F1-based model selection
-- **pandas / numpy** — feature engineering (~60 numeric features per host)
-- **Nmap** — network discovery and service detection (`-sV`, NSE scripts)
-- **joblib** — model serialization
+| Layer | Tools |
+|---|---|
+| Network scanning | Nmap — two-phase: fast port discovery (`-T4 --min-rate 2000`) then targeted service scan (`-sV`, NSE: `default`, `safe`, `banner`, `smb-os-discovery`, `ssl-cert`) |
+| Feature engineering | pandas / numpy — ~60 numeric features per host |
+| ML classification | scikit-learn — Logistic Regression + Decision Tree, best F1 wins |
+| Model persistence | joblib |
+| Reporting | Plain text + CSV — no external dashboard dependency |
 
 ---
 
 ## Features
 
+### Core Pipeline
 - Scans local network with Nmap and parses XML output into structured host records
-- Extracts ~60 numeric features per host (open port counts, risk-tier flags, protocol categories)
-- Assigns heuristic training labels (`normal` / `suspicious`) using a rule-based scoring system
-- Trains Logistic Regression and Decision Tree classifiers; selects the best by F1 score on the suspicious class
-- Predicts risk level for each host with probability scores and severity tiers (`LOW` / `MEDIUM` / `HIGH` / `CRITICAL`)
-- Generates structured security alerts per host (e.g. `[CRITICAL] High Risk Port Detected: RDP`, `[HIGH] Cleartext Protocol in Use: FTP`)
-- Produces a detailed explanation for each flagged host including detected services, dangerous service combinations, exposure patterns, and real-world attack technique mapping (Brute Force, Lateral Movement, Reconnaissance)
-- Generates per-host security recommendations based on exposed services
-- Assigns a 0–100 risk score derived from model confidence
-- Exports a full text report with per-host analysis, alert list, and remediation steps
-- Caches scan results (SHA-256 keyed) to avoid redundant network scans
-- Falls back to built-in synthetic data when Nmap is unavailable — pipeline always runs end-to-end
-- Includes a testcase mode with a simulated 52-host internet café network (no real scan needed)
+- Extracts ~60 numeric features per host: open port counts, risk-tier flags, cleartext count, DB count, admin port count, fileshare count, remote access count, uncommon port count
+- Assigns heuristic training labels (`normal` / `suspicious`) via rule-based scoring
+- Trains Logistic Regression and Decision Tree; selects the best by F1 on the suspicious class
+- Predicts with probability score (0.0–1.0) and severity tier: `LOW` / `MEDIUM` / `HIGH` / `CRITICAL`
+
+### SOC Analyst Layer
+- **Risk Score (0–100)** derived from model confidence
+- **Structured Alerts** — 25+ named rules fire per host (e.g. `[CRITICAL] Unauthenticated Service Exposed: Redis`, `[HIGH] Multiple Remote Access Vectors Exposed`)
+- **SOC Triage Status** — three action levels based on alert severity and probability:
+  - `Immediate Action` — isolate and begin incident response now
+  - `Investigate` — review service versions and authentication logs
+  - `Monitor` — capture traffic and watch for anomalies
+- **Asset Fingerprinting** — classifies each host as: `server`, `workstation`, `database_server`, `file_server`, `container_host`, `printer`, `iot_camera`, `iot_device`, `mail_server`, `network_device`, or `unknown`
+- **Baseline Comparison** — saves a port baseline after each run; subsequent runs detect new hosts, newly opened ports, and closed ports
+- **MITRE ATT&CK Mapping** — flags enabled techniques with IDs:
+  - T1110 Brute Force (SSH, RDP, SMB, WinRM, database ports…)
+  - TA0008 Lateral Movement (SMB, RDP, WinRM, Docker API, K8s API…)
+  - T1046 Reconnaissance (SNMP, NetBIOS, LDAP, DNS, Elasticsearch…)
+  - TA0010 Data Exfiltration (FTP, DNS, SMTP, NFS)
+- **Dangerous Combination Detection** — flags high-risk port pairs (e.g. SMB + RDP = classic ransomware path, Redis + Docker API = cache-to-container pivot)
+- **Per-Host Recommendations** — actionable remediation steps for every exposed service
+- **Feature Importance Report** — which features drove the model's decisions
+
+### Infrastructure
+- SHA-256 keyed scan cache — avoids redundant Nmap scans
+- Scan history snapshots — timestamped JSON per run
+- Cumulative history dataset — CSV that grows across runs for future ML retraining
+- Unknown port enrichment — second-pass targeted Nmap scan on unidentified ports
+- Fallback to synthetic data when Nmap is unavailable — pipeline always completes
 
 ---
 
@@ -37,25 +71,28 @@ A command-line tool that combines **Nmap network scanning** with **machine learn
 ```
 Nmap_AI/
 ├── src/
-│   ├── main.py                # CLI entry point — dispatches all commands
-│   ├── scanner.py             # Nmap subprocess wrapper
-│   ├── parser_nmap.py         # Nmap XML → host records
-│   ├── features.py            # Feature engineering → DataFrame (~60 columns)
-│   ├── labeling.py            # Heuristic scoring and label assignment
-│   ├── trainer.py             # Model training and selection
-│   ├── predictor.py           # Inference, severity scoring, risk score (0–100)
-│   ├── alerts.py              # Structured alert generation (CRITICAL/HIGH/MEDIUM/LOW)
-│   ├── explainer.py           # Per-host explanation with attack technique mapping
+│   ├── main.py                # CLI entry point — all commands dispatched here
+│   ├── scanner.py             # Nmap subprocess wrapper (discovery + service + unknown pass)
+│   ├── parser_nmap.py         # Nmap XML → structured host records
+│   ├── features.py            # Feature engineering → DataFrame (~60 columns per host)
+│   ├── labeling.py            # Heuristic rule-based label assignment (normal/suspicious)
+│   ├── trainer.py             # Model training, F1 selection, feature importance
+│   ├── predictor.py           # Inference: probability, severity, risk score, triage, asset type
+│   ├── triage.py              # SOC triage engine: Immediate Action / Investigate / Monitor
+│   ├── asset_profiler.py      # Device fingerprinting: server, workstation, container_host…
+│   ├── baseline.py            # Baseline save/load/compare for change detection
+│   ├── alerts.py              # 25+ named alert rules (CRITICAL/HIGH/MEDIUM/LOW)
+│   ├── explainer.py           # Explanation: services, combos, exposure patterns, MITRE ATT&CK
 │   ├── recommender.py         # Per-host security recommendations
-│   ├── port_intel.py          # Port profile database and enrichment
-│   ├── scan_cache.py          # Scan result caching and history snapshots
-│   ├── unknown_enrichment.py  # Second-pass Nmap scan for unknown ports
-│   ├── synthetic_data.py      # 20 synthetic hosts for demo/fallback
-│   ├── test_case_records.py   # 52-host simulated internet café testcase
-│   ├── sample_data.py         # Minimal fallback sample records
+│   ├── port_intel.py          # Port profile database — risk tier, category, description
+│   ├── scan_cache.py          # Scan caching, history snapshots, learned record memory
+│   ├── unknown_enrichment.py  # Second-pass scan for unknown/unidentified ports
+│   ├── synthetic_data.py      # 20 synthetic hosts for demo/fallback (no Nmap needed)
+│   ├── test_case_records.py   # 52-host simulated internet café for testcase mode
+│   ├── sample_data.py         # Minimal fallback records when Nmap scan yields nothing
 │   ├── local_target.py        # Detects local machine IP via UDP socket
-│   ├── constants.py           # Port group definitions and threshold constants
-│   └── utils.py               # Shared utilities and report formatters
+│   ├── constants.py           # All numeric constants: port sets, thresholds, model params
+│   └── utils.py               # Shared utilities, report formatters, baseline diff display
 ├── requirements.txt
 └── .gitignore
 ```
@@ -66,11 +103,13 @@ Nmap_AI/
 
 ```bash
 python3 -m venv MyEnv
-source MyEnv/bin/activate
-pip install -r requirements.txt
+MyEnv/bin/pip3 install -r requirements.txt   # macOS/Linux
+# Windows: MyEnv\Scripts\pip3 install -r requirements.txt
 ```
 
-Install [Nmap](https://nmap.org/download.html) if you want live network scanning.
+> **Note:** All `python3` commands below should also use `MyEnv/bin/python3` (macOS/Linux) or `MyEnv\Scripts\python3` (Windows) if your shell doesn't pick up the venv after `source MyEnv/bin/activate`.
+
+Install [Nmap](https://nmap.org/download.html) for live network scanning. All other commands work without it.
 
 ---
 
@@ -79,110 +118,226 @@ Install [Nmap](https://nmap.org/download.html) if you want live network scanning
 All commands run from the project root:
 
 ```bash
-# Full pipeline — scan the current network, train, and predict
+# Recommended: full pipeline (scan → train → predict → report)
 python3 src/main.py full
 
-# Full pipeline using testcase XML (no real scan, no Nmap needed)
+# Testcase mode — 52-host internet café simulation, no Nmap needed
 python3 src/test_case_records.py
 python3 src/main.py full testcase
 
-# Full pipeline with a forced fresh Nmap scan (ignores cache)
+# Force a fresh Nmap scan (ignore cache)
 python3 src/main.py full --rescan
 
-# Generate safe synthetic data, train, and predict without scanning
+# Generate synthetic training data, train, and predict (offline demo)
 python3 src/main.py generate-dataset
 
-# Run individual stages
+# Analyze an existing Nmap XML file (no scanning)
+python3 src/main.py analyze path/to/scan.xml
+
+# Individual stages
 python3 src/main.py scan
 python3 src/main.py build-training
 python3 src/main.py train
 python3 src/main.py predict
-
-# Analyze an existing Nmap XML file offline
-python3 src/main.py analyze <path/to/scan.xml>
 ```
 
-### Command / Nmap dependency matrix
+### Nmap Dependency Matrix
 
 | Command | Needs Nmap? |
 |---|---|
-| `full` | Yes (falls back to sample data if unavailable) |
+| `full` | Yes — falls back to sample data if unavailable |
 | `full testcase` | No |
 | `full --rescan` | Yes |
 | `generate-dataset` | No |
-| `scan` | Yes (falls back to sample data) |
-| `build-training` | No (uses cached scan data) |
-| `train` | No |
-| `predict` | No (uses cached scan data) |
 | `analyze <xml>` | No |
+| `scan` | Yes — falls back to sample data |
+| `build-training`, `train`, `predict` | No |
 
 ---
 
-## Pipeline Overview
+## Pipeline
 
 ```
-Network / XML / Synthetic data
-        │
-        ▼
-   Nmap scan  ──►  XML parse  ──►  Host records
-        │
-        ▼
-   Feature engineering  (~60 columns per host)
-        │
-        ▼
-   Heuristic labeling  (rule-based score → normal / suspicious)
-        │
-        ▼
-   Model training  (Logistic Regression + Decision Tree → best F1)
-        │
-        ▼
-   Risk prediction  (probability + severity tier + risk score 0–100)
-        │
-        ▼
-   Alert generation  (CRITICAL / HIGH / MEDIUM / LOW per triggered rule)
-        │
-        ▼
-   Explanation + attack mapping  (why flagged, service combos, ATT&CK techniques)
-        │
-        ▼
-   Reports  (prediction_result.txt, predictions.csv, port_details, history snapshots)
+Network / Testcase XML / Synthetic data
+         │
+         ▼
+    Nmap scan (two-phase)
+      Phase 1: fast port discovery  (-T4, --min-rate 2000, -p-, no service detect)
+      Phase 2: targeted service scan (-sV, NSE scripts, only on open ports found above)
+         ──►  XML parse  ──►  Host records
+         │
+         ▼
+    Feature engineering  (~60 columns: risk flags, port counts, categories)
+         │
+         ▼
+    Heuristic labeling  (rule-based score → normal / suspicious)
+         │
+         ▼
+    Model training  (Logistic Regression + Decision Tree → best F1)
+         │
+         ▼
+    Baseline comparison  (new hosts? new ports? changes since last scan?)
+         │
+         ▼
+    Risk prediction  (probability + severity + risk score 0–100)
+         │
+         ▼
+    Asset fingerprinting  (server / workstation / container_host / …)
+         │
+         ▼
+    Triage assignment  (Immediate Action / Investigate / Monitor)
+         │
+         ▼
+    Alert generation  (25+ named rules, CRITICAL → LOW)
+         │
+         ▼
+    Explanation + MITRE ATT&CK mapping
+         │
+         ▼
+    Reports  (prediction_result.txt, predictions.csv, port_details, history snapshots)
 ```
 
 ---
 
-## Terminal Output
-
-The terminal shows a concise per-host summary for each suspicious host:
+## Terminal Output (Sample)
 
 ```
-[1] 10.10.0.203 (client-pc-43-pivot)
+================ AI SECURITY ALERT SUMMARY ================
+
+[1] 10.10.0.203 (client-pc-43-pivot)  [workstation]
     Severity : CRITICAL | Risk Score : 99.8/100 | Confidence : 0.998
+    Triage   : Immediate Action
+               ↳ Isolate or block the host and begin incident response now
     Ports    : 21;23;445;3389
     Alerts   : 5 triggered (top 3 shown)
       [CRITICAL] High Risk Port Detected: SMB
       [CRITICAL] High Risk Port Detected: RDP
       [HIGH] Cleartext Protocol in Use: FTP
-    → Full explanation: result/prediction_result.txt
-```
+    → Full report: result/prediction_result.txt
+----------------------------------------------------------
 
-Full analysis — detected services, dangerous combinations, exposure patterns, and real-world attack mapping — is written to `result/prediction_result.txt`.
+==========================================================
+```
 
 ---
 
-## Output
+## Report Output (prediction_result.txt — Sample)
 
-After running, check the `result/` folder:
+```
+[1] IP: 10.10.0.203
+Hostname  : client-pc-43-pivot
+Asset Type: workstation
+Severity  : CRITICAL
+Triage    : Immediate Action
+Risk Score: 99.8/100
+Confidence: 0.998
+
+Top Risk Ports: 21;23;445;3389
+
+Why flagged:
+  Flagged because: 4 known high-risk port(s) detected (4 critical/very-high): 21, 23, 445, 3389
+
+  Detected high-risk services:
+    • FTP                port 21          cleartext file transfer — credentials visible on the wire
+    • Telnet             port 23          cleartext remote shell — passwords sent in plaintext
+    • SMB                port 445         Windows file sharing — primary ransomware and lateral movement vector
+    • RDP                port 3389        Windows remote desktop — common brute-force and ransomware entry
+
+  Dangerous service combinations:
+    • SMB (445) + RDP (3389) both open — classic ransomware lateral movement path
+    • Telnet (23) + FTP (21) — two cleartext credential channels active simultaneously
+
+  MITRE ATT&CK mapping:
+    • [T1110] Brute Force            FTP (21), Telnet (23), RDP (3389), SMB (445)
+                                       ↳ attacker repeatedly tries credentials to gain unauthorized access
+    • [TA0008] Lateral Movement      SMB (445), RDP (3389)
+                                       ↳ attacker moves through the network after initial compromise
+
+Security Alerts:
+  [CRITICAL] High Risk Port Detected: SMB
+    SMB (port 445) is exposed — primary vector for ransomware and lateral movement
+  [CRITICAL] High Risk Port Detected: RDP
+    RDP (port 3389) is exposed — common brute-force and ransomware entry point
+  [HIGH] Cleartext Protocol in Use: FTP
+    FTP (port 21) is open — file contents and credentials transmitted without encryption
+
+Recommendations:
+- Review SMB or file-sharing exposure and restrict it to trusted subnets
+- Restrict remote desktop services with firewall rules and MFA
+- Disable plain FTP or restrict it behind VPN and strong authentication
+```
+
+---
+
+## Output Files
 
 | File | Description |
 |---|---|
-| `prediction_result.txt` | Main report — suspicious hosts with risk scores, security alerts, why-flagged explanations, attack technique mapping, and recommendations |
-| `predictions.csv` | Full prediction table with probability scores, severity, risk score, alert summary, and feature counts |
-| `port_details.txt` | Detailed per-port report with risk levels, enrichment data, and remediation actions |
-| `port_details.csv` | Machine-readable version of the port detail report |
-| `scan_result.txt` | Human-readable scan summary with open ports and enriched service info |
-| `best_model.joblib` | Serialized trained model bundle |
-| `metrics.txt` | F1, precision, recall for the selected model |
-| `feature_importance.txt` | Which features the model weighted most heavily |
-| `training_data_full.csv` | Complete feature dataset used for training |
-| `training_data.csv` | Readable training table with risk summaries |
-| `history/` | Timestamped JSON snapshots of each run |
+| `result/prediction_result.txt` | Full triage report — alerts, MITRE mapping, explanations, recommendations, baseline diff |
+| `result/predictions.csv` | Prediction table with probability, risk score, severity, triage status, asset type, alert summary |
+| `result/baseline.json` | Saved port baseline — compared on the next run to detect changes |
+| `result/port_details.txt` | Per-port detail report with risk level, enrichment data, and remediation |
+| `result/port_details.csv` | Machine-readable port detail table |
+| `result/scan_result.txt` | Human-readable scan summary |
+| `result/best_model.joblib` | Serialized trained model bundle |
+| `result/metrics.txt` | F1, precision, recall for the selected model |
+| `result/feature_importance.txt` | Top features driving model decisions |
+| `result/training_data_full.csv` | Full feature dataset used for training |
+| `result/training_data.csv` | Readable training table with risk summaries |
+| `result/history_dataset.csv` | Cumulative history across all runs |
+| `result/history/` | Timestamped JSON snapshots of each full run |
+
+---
+
+## Triage Levels
+
+| Level | Trigger Condition | Recommended Action |
+|---|---|---|
+| `Immediate Action` | CRITICAL alert OR probability > 0.98 | Isolate host, begin incident response |
+| `Investigate` | HIGH alert OR probability > 0.95 | Review logs, verify service versions |
+| `Monitor` | Suspicious with MEDIUM/LOW alerts | Capture traffic, watch outbound connections |
+
+---
+
+## Alert Severity Levels
+
+| Severity | Example Triggers |
+|---|---|
+| CRITICAL | Telnet (23), SMB (445), RDP (3389), VNC (5900), Docker API, Redis, Elasticsearch, database ports |
+| HIGH | FTP (21), TFTP, SNMP, WinRM, Memcached, MQTT, multiple cleartext/admin/remote-access services |
+| MEDIUM | Excessive open ports (≥8), uncommon port cluster (≥3 non-standard ports) |
+| LOW | SSH (22), HTTP (80), SMTP (25), DNS (53), IoT/printer devices |
+
+---
+
+## MITRE ATT&CK Techniques Covered
+
+| Technique ID | Name | Triggered By |
+|---|---|---|
+| T1110 | Brute Force | SSH, Telnet, FTP, RDP, VNC, SMB, WinRM, MSSQL, MySQL, PostgreSQL, MongoDB, Redis |
+| TA0008 | Lateral Movement | SMB, RDP, WinRM, RPC Bind, NetBIOS, SSH, VNC, Docker API, Kubernetes API |
+| T1046 | Network Service Discovery (Recon) | SNMP, RPC Bind, NetBIOS, LDAP, DNS, NFS, FTP, Telnet, Elasticsearch, Redis, MongoDB |
+| TA0010 | Data Exfiltration | FTP, DNS, SMTP, NFS |
+
+---
+
+## Limitations
+
+- The ML model trains on heuristic labels derived from the same scan — it learns the rule-based scoring, not real ground truth. This is intentional for a supervised demo with no labeled dataset.
+- Feature extraction is port-based; the model cannot analyze packet payloads or timing behavior.
+- Nmap scan depth depends on network conditions and requires elevated privileges for some scan types.
+- Baseline comparison tracks open ports only — service version changes within the same port are not detected.
+- No real-time monitoring — this is a point-in-time snapshot tool, not a continuous IDS.
+
+---
+
+## Future Roadmap
+
+| Phase | Upgrade |
+|---|---|
+| Near-term | Config file (YAML) for risk thresholds, ignored ports, trusted hosts |
+| Near-term | Service version change detection in baseline comparison |
+| Mid-term | Isolation Forest / anomaly detection for unlabeled environments |
+| Mid-term | Streamlit dashboard for visual triage |
+| Long-term | Zeek / Suricata log ingestion |
+| Long-term | LLM-based analyst assistant for natural language queries |

@@ -34,12 +34,14 @@ def load_pandas_or_project_venv():
 pd = load_pandas_or_project_venv()
 
 from alerts import generate_alerts_for_row
+from baseline import compare_to_baseline, save_baseline
 from local_target import get_local_ip
 from parser_nmap import extract_live_hosts_from_discovery, parse_nmap_service_scan
 from predictor import predict_from_records
 from sample_data import get_sample_records
 from scanner import run_full_scan
 from synthetic_data import get_synthetic_records
+from triage import TRIAGE_GUIDANCE
 from scan_cache import (
     dedupe_records,
     get_cached_scan,
@@ -400,9 +402,14 @@ def print_suspicious_summary(df):
         probability = row.get("predicted_probability_suspicious", 0.0)
         severity = severity_from_probability(probability)
 
-        print(f"[{i}] {row['ip']} ({row['hostname']})")
+        triage = row.get("triage_status", "—")
+        asset = row.get("asset_type", "unknown")
+        print(f"[{i}] {row['ip']} ({row['hostname']})  [{asset}]")
         risk_score = row.get("risk_score", round(probability * 100, 1))
         print(f"    Severity : {severity} | Risk Score : {risk_score}/100 | Confidence : {probability:.3f}")
+        print(f"    Triage   : {triage}")
+        if triage in TRIAGE_GUIDANCE:
+            print(f"               ↳ {TRIAGE_GUIDANCE[triage]}")
         print(f"    Ports    : {row.get('top_risk_ports', 'None')}")
 
         host_alerts = generate_alerts_for_row(row)
@@ -416,7 +423,7 @@ def print_suspicious_summary(df):
             for alert in top_alerts:
                 print(f"      [{alert['severity']}] {alert['title']}")
 
-        print(f"    → Full explanation: result/prediction_result.txt")
+        print(f"    → Full report: result/prediction_result.txt")
         print("-" * 58)
 
     print("\n==========================================================\n")
@@ -534,10 +541,13 @@ def command_predict():
     model_path = str(result_dir / "best_model.joblib")
     output_csv = str(result_dir / "predictions.csv")
     output_txt = str(result_dir / "prediction_result.txt")
+    baseline_path = str(result_dir / "baseline.json")
 
+    baseline_diff = compare_to_baseline(records, baseline_path)
     write_port_details(records, str(result_dir / "port_details.csv"), str(result_dir / "port_details.txt"))
     df = predict_from_records(records, model_path, output_csv)
-    write_txt(dataframe_to_prediction_text(df), output_txt)
+    write_txt(dataframe_to_prediction_text(df, baseline_diff=baseline_diff), output_txt)
+    save_baseline(records, baseline_path)
     print_suspicious_summary(df)
 
 # EN: Analyze an existing Nmap XML file without running any scan.
@@ -615,8 +625,11 @@ def command_analyze(xml_path):
         print("Offline XML analysis finished. Model training was skipped.\n")
         return
 
+    baseline_path = str(result_dir / "baseline.json")
+    baseline_diff = compare_to_baseline(records, baseline_path)
     pred_df = predict_from_records(records, output_model, output_csv)
-    write_txt(dataframe_to_prediction_text(pred_df), output_txt)
+    write_txt(dataframe_to_prediction_text(pred_df, baseline_diff=baseline_diff), output_txt)
+    save_baseline(records, baseline_path)
     snapshot_path = save_full_result_snapshot(
         result_dir,
         str(xml_file),
@@ -690,6 +703,9 @@ def command_full(mode="real", force_rescan=False, skip_unknown_enrich=False):
     feature_importance_report = str(result_dir / "feature_importance.txt")
     output_csv = str(result_dir / "predictions.csv")
     output_txt = str(result_dir / "prediction_result.txt")
+    baseline_path = str(result_dir / "baseline.json")
+
+    baseline_diff = compare_to_baseline(records, baseline_path)
 
     bundle, note = train_models(training_csv, output_model)
     write_metrics_report(bundle, metrics_report, note)
@@ -704,6 +720,7 @@ def command_full(mode="real", force_rescan=False, skip_unknown_enrich=False):
             output_txt
         )
         write_txt("", output_csv)
+        save_baseline(records, baseline_path)
         save_full_result_snapshot(
             result_dir,
             scan_meta.get("target", "testcase"),
@@ -722,7 +739,8 @@ def command_full(mode="real", force_rescan=False, skip_unknown_enrich=False):
         return
 
     pred_df = predict_from_records(records, output_model, output_csv)
-    write_txt(dataframe_to_prediction_text(pred_df), output_txt)
+    write_txt(dataframe_to_prediction_text(pred_df, baseline_diff=baseline_diff), output_txt)
+    save_baseline(records, baseline_path)
     snapshot_path = save_full_result_snapshot(
         result_dir,
         scan_meta.get("target", "testcase"),

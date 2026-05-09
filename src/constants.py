@@ -57,6 +57,12 @@ CONFIDENCE_PRINTER = 0.55
 CONFIDENCE_WEB_ADMIN = 0.30
 CONFIDENCE_MAX = 0.95
 
+# ── Nmap scan timing ──────────────────────────────────────────────────────────
+NMAP_FAST_MIN_RATE = 2000       # packets/sec for phase-1 port discovery
+NMAP_FAST_MAX_RETRIES = 1       # low retries — speed over completeness in phase 1
+NMAP_SERVICE_MAX_RETRIES = 2    # reduced from 3; catches most services with less wait
+NMAP_SERVICE_VERSION_INTENSITY = 7  # 7 = thorough but not exhaustive (vs --version-all = 9)
+
 # ── Reporting ──────────────────────────────────────────────────────────────────
 SCRIPT_OUTPUT_MAX_LENGTH = 140
 PROGRESS_SPINNER_INTERVAL = 0.15

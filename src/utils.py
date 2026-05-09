@@ -110,7 +110,7 @@ def run_command(cmd, show_progress=False, timeout=None):
 
         raise KeyboardInterrupt("Scan was cancelled by user.")
 
-    state["done"] = True
+    scan_progress["done"] = True
     stderr_thread.join()
     display_thread.join()
 
@@ -263,9 +263,59 @@ def severity_from_probability(p):
         return "MEDIUM"
     return "LOW"
 
+# EN: Format the baseline comparison diff as a readable text block.
+# VI: Định dạng kết quả so sánh baseline thành khối chữ dễ đọc.
+def _format_baseline_diff(diff):
+    lines = []
+    lines.append("================ BASELINE COMPARISON ======================\n\n")
+
+    any_change = (
+        diff["new_hosts"]
+        or diff["gone_hosts"]
+        or diff["new_ports"]
+        or diff["closed_ports"]
+    )
+
+    if not any_change:
+        lines.append("No changes detected — current scan matches the previous baseline.\n")
+        lines.append(f"Unchanged hosts: {diff['unchanged_count']}\n")
+    else:
+        if diff["new_hosts"]:
+            lines.append(f"New hosts appeared ({len(diff['new_hosts'])}):\n")
+            for ip in diff["new_hosts"]:
+                lines.append(f"  + {ip}\n")
+            lines.append("\n")
+
+        if diff["gone_hosts"]:
+            lines.append(f"Hosts no longer reachable ({len(diff['gone_hosts'])}):\n")
+            for ip in diff["gone_hosts"]:
+                lines.append(f"  - {ip}\n")
+            lines.append("\n")
+
+        if diff["new_ports"]:
+            lines.append(f"Newly opened ports ({len(diff['new_ports'])} host(s)):\n")
+            for ip, ports in diff["new_ports"].items():
+                port_str = ", ".join(str(p) for p in ports)
+                lines.append(f"  {ip}  +ports: {port_str}\n")
+            lines.append("\n")
+
+        if diff["closed_ports"]:
+            lines.append(f"Ports no longer open ({len(diff['closed_ports'])} host(s)):\n")
+            for ip, ports in diff["closed_ports"].items():
+                port_str = ", ".join(str(p) for p in ports)
+                lines.append(f"  {ip}  -ports: {port_str}\n")
+            lines.append("\n")
+
+        if diff["unchanged_count"] > 0:
+            lines.append(f"Unchanged hosts: {diff['unchanged_count']}\n")
+
+    lines.append("==========================================================\n\n")
+    return lines
+
+
 # EN: Turn predictions into the final text report.
 # VI: Đổi kết quả dự đoán thành báo cáo chữ cuối.
-def dataframe_to_prediction_text(df):
+def dataframe_to_prediction_text(df, baseline_diff=None):
     lines = []
 
     total = len(df)
@@ -286,22 +336,34 @@ def dataframe_to_prediction_text(df):
         lines.append("Top Suspicious Hosts:\n")
         for i, (_, row) in enumerate(top.iterrows(), 1):
             sev = severity_from_probability(row["predicted_probability_suspicious"])
-            lines.append(f"{i}. {row['ip']} ({row['hostname']}) - {sev}\n")
+            triage = row.get("triage_status", "")
+            triage_str = f" [{triage}]" if triage and triage != "—" else ""
+            lines.append(f"{i}. {row['ip']} ({row['hostname']}) - {sev}{triage_str}\n")
 
     lines.append("\n==========================================================\n\n")
 
+    if baseline_diff is not None:
+        lines.extend(_format_baseline_diff(baseline_diff))
+
     lines.append("-------------------- HOST ANALYSIS ------------------------\n\n")
-    lines.append(f"{'IP':<15} {'HOSTNAME':<20} {'STATUS':<12} {'PROB':<8} {'SEVERITY':<10} {'PORTS':<6} {'RISKS':<6}\n")
-    lines.append("-" * 75 + "\n")
+    lines.append(
+        f"{'IP':<15} {'HOSTNAME':<20} {'STATUS':<12} {'PROB':<8} "
+        f"{'SEVERITY':<10} {'TRIAGE':<18} {'ASSET':<16} {'PORTS':<6} {'RISKS':<6}\n"
+    )
+    lines.append("-" * 105 + "\n")
 
     for _, row in df.iterrows():
         sev = severity_from_probability(row["predicted_probability_suspicious"])
+        triage = row.get("triage_status", "—")
+        asset = row.get("asset_type", "unknown")
         lines.append(
             f"{row['ip']:<15} "
             f"{row['hostname']:<20} "
             f"{row['prediction'].upper():<12} "
             f"{row['predicted_probability_suspicious']:.2f}   "
             f"{sev:<10} "
+            f"{triage:<18} "
+            f"{asset:<16} "
             f"{row['open_port_count']:<6} "
             f"{row['risky_port_count']:<6}\n"
         )
@@ -318,13 +380,17 @@ def dataframe_to_prediction_text(df):
 
         for i, (_, row) in enumerate(sorted_df.iterrows(), 1):
             sev = severity_from_probability(row["predicted_probability_suspicious"])
+            triage = row.get("triage_status", "—")
+            asset = row.get("asset_type", "unknown")
 
             lines.append(f"[{i}] IP: {row['ip']}\n")
-            lines.append(f"Hostname: {row['hostname']}\n")
-            lines.append(f"Severity: {sev}\n")
+            lines.append(f"Hostname  : {row['hostname']}\n")
+            lines.append(f"Asset Type: {asset}\n")
+            lines.append(f"Severity  : {sev}\n")
+            lines.append(f"Triage    : {triage}\n")
             risk_score = row.get("risk_score", round(row["predicted_probability_suspicious"] * 100, 1))
             lines.append(f"Risk Score: {risk_score}/100\n")
-            lines.append(f"Probability: {row['predicted_probability_suspicious']:.3f}\n\n")
+            lines.append(f"Confidence: {row['predicted_probability_suspicious']:.3f}\n\n")
             if "top_risk_ports" in row:
                 lines.append(f"Top Risk Ports: {row['top_risk_ports']}\n\n")
 

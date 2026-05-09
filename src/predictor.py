@@ -5,9 +5,11 @@ import joblib
 import pandas as pd
 from constants import SEVERITY_CRITICAL_MIN_PROB, SEVERITY_HIGH_MIN_PROB, SEVERITY_MEDIUM_MIN_PROB
 from alerts import generate_alerts_for_row, alerts_to_summary_string
+from asset_profiler import classify_asset
 from features import records_to_dataframe
 from port_intel import risky_ports_from_record
 from recommender import recommend_for_row
+from triage import compute_triage_status, TRIAGE_NONE
 
 # EN: Open the saved machine learning model.
 # VI: Mở mô hình máy học đã lưu.
@@ -65,6 +67,13 @@ def predict_from_records(records, model_path, output_csv=None):
     df["alerts"] = df.apply(
         lambda row: alerts_to_summary_string(generate_alerts_for_row(row)), axis=1
     )
+    df["asset_type"] = df.apply(classify_asset, axis=1)
+    df["triage_status"] = df.apply(
+        lambda row: compute_triage_status(row, generate_alerts_for_row(row))
+        if row["prediction"] == "suspicious"
+        else TRIAGE_NONE,
+        axis=1,
+    )
 
     export_df = df[
         [
@@ -74,6 +83,8 @@ def predict_from_records(records, model_path, output_csv=None):
             "predicted_probability_suspicious",
             "risk_score",
             "severity",
+            "triage_status",
+            "asset_type",
             "open_port_count",
             "risky_port_count",
             "very_risky_port_count",
