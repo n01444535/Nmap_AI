@@ -25,8 +25,10 @@ The goal is to close the gap between raw scan data and actionable SOC workflow.
 | Network scanning | Nmap — two-phase: fast port discovery (`-T4 --min-rate 2000`) then targeted service scan (`-sV`, NSE: `default`, `safe`, `banner`, `smb-os-discovery`, `ssl-cert`) |
 | Feature engineering | pandas / numpy — ~60 numeric features per host |
 | ML classification | scikit-learn — Logistic Regression + Decision Tree, best F1 wins |
+| Anomaly detection | scikit-learn — Isolation Forest trained unsupervised alongside the classifier |
 | Model persistence | joblib |
-| Reporting | Plain text + CSV — no external dashboard dependency |
+| Dashboard | Streamlit + Plotly — visual SOC triage UI |
+| Reporting | Plain text + CSV — readable without any external tool |
 
 ---
 
@@ -47,7 +49,10 @@ The goal is to close the gap between raw scan data and actionable SOC workflow.
   - `Investigate` — review service versions and authentication logs
   - `Monitor` — capture traffic and watch for anomalies
 - **Asset Fingerprinting** — classifies each host as: `server`, `workstation`, `database_server`, `file_server`, `container_host`, `printer`, `iot_camera`, `iot_device`, `mail_server`, `network_device`, or `unknown`
-- **Baseline Comparison** — saves a port baseline after each run; subsequent runs detect new hosts, newly opened ports, and closed ports
+- **Baseline Comparison** — saves a port baseline after each run; subsequent runs detect new hosts, newly opened ports, closed ports, and **service version changes** (e.g. `nginx 1.18` → `nginx 1.24` on port 80)
+- **Isolation Forest Anomaly Detection** — unsupervised second opinion trained on all host feature vectors; produces a 0–1 `anomaly_score` per host to catch unusual profiles the classifier may not flag
+- **Continuous Monitor Mode** — `monitor` command runs full scan → predict → baseline diff on a configurable interval; press Ctrl+C to stop
+- **Streamlit SOC Dashboard** — visual triage UI: risk score bars, severity/triage distribution charts, color-coded host table, anomaly scores, baseline state, and feature importance — launch with `streamlit run src/dashboard.py`
 - **MITRE ATT&CK Mapping** — flags enabled techniques with IDs:
   - T1110 Brute Force (SSH, RDP, SMB, WinRM, database ports…)
   - TA0008 Lateral Movement (SMB, RDP, WinRM, Docker API, K8s API…)
@@ -94,7 +99,8 @@ Nmap_AI/
 │   ├── sample_data.py         # Minimal fallback records when Nmap scan yields nothing
 │   ├── local_target.py        # Detects local machine IP via UDP socket
 │   ├── constants.py           # All numeric constants: port sets, thresholds, model params
-│   └── utils.py               # Shared utilities, report formatters, baseline diff display
+│   ├── utils.py               # Shared utilities, report formatters, baseline diff display
+│   └── dashboard.py           # Streamlit SOC dashboard — visual triage UI
 ├── config.yaml                # User overrides: trusted_hosts, ignore_ports
 ├── requirements.txt
 └── .gitignore
@@ -130,6 +136,13 @@ python3 src/main.py full testcase
 
 # Force a fresh Nmap scan (ignore cache)
 python3 src/main.py full --rescan
+
+# Continuous monitoring — scan every 5 minutes (Ctrl+C to stop)
+python3 src/main.py monitor
+python3 src/main.py monitor --interval 10  # custom interval in minutes
+
+# Launch the Streamlit SOC dashboard
+streamlit run src/dashboard.py
 
 # Generate synthetic training data, train, and predict (offline demo)
 python3 src/main.py generate-dataset
@@ -277,7 +290,7 @@ Recommendations:
 | File | Description |
 |---|---|
 | `result/prediction_result.txt` | Full triage report — alerts, MITRE mapping, explanations, recommendations, baseline diff |
-| `result/predictions.csv` | Prediction table with probability, risk score, severity, triage status, asset type, alert summary |
+| `result/predictions.csv` | Prediction table with probability, risk score, severity, triage status, asset type, anomaly score, alert summary |
 | `result/baseline.json` | Saved port baseline — compared on the next run to detect changes |
 | `result/port_details.txt` | Per-port detail report with risk level, enrichment data, and remediation |
 | `result/port_details.csv` | Machine-readable port detail table |
@@ -336,11 +349,12 @@ Recommendations:
 
 ## Future Roadmap
 
-| Phase | Upgrade |
-|---|---|
-| Near-term | Config file (YAML) for risk thresholds, ignored ports, trusted hosts |
-| Near-term | Service version change detection in baseline comparison |
-| Mid-term | Isolation Forest / anomaly detection for unlabeled environments |
-| Mid-term | Streamlit dashboard for visual triage |
-| Long-term | Zeek / Suricata log ingestion |
-| Long-term | LLM-based analyst assistant for natural language queries |
+| Phase | Upgrade | Status |
+|---|---|---|
+| Near-term | Config file (YAML) for risk thresholds, ignored ports, trusted hosts | ✅ Done |
+| Near-term | Service version change detection in baseline comparison | ✅ Done |
+| Near-term | Continuous monitor mode with configurable scan interval | ✅ Done |
+| Mid-term | Isolation Forest / anomaly detection for unlabeled environments | ✅ Done |
+| Mid-term | Streamlit dashboard for visual triage | ✅ Done |
+| Long-term | Zeek / Suricata log ingestion | Planned |
+| Long-term | LLM-based analyst assistant for natural language queries | Planned |

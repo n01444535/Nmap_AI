@@ -274,6 +274,7 @@ def _format_baseline_diff(diff):
         or diff["gone_hosts"]
         or diff["new_ports"]
         or diff["closed_ports"]
+        or diff.get("version_changes", {})
     )
 
     if not any_change:
@@ -304,6 +305,18 @@ def _format_baseline_diff(diff):
             for ip, ports in diff["closed_ports"].items():
                 port_str = ", ".join(str(p) for p in ports)
                 lines.append(f"  {ip}  -ports: {port_str}\n")
+            lines.append("\n")
+
+        version_changes = diff.get("version_changes", {})
+        if version_changes:
+            lines.append(f"Service version changes ({len(version_changes)} host(s)):\n")
+            for ip, changes in version_changes.items():
+                for change in changes:
+                    svc = f" [{change['service']}]" if change.get("service") else ""
+                    lines.append(
+                        f"  {ip}  port {change['port']}{svc}: "
+                        f"{change['from_version']} → {change['to_version']}\n"
+                    )
             lines.append("\n")
 
         if diff["unchanged_count"] > 0:

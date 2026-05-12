@@ -63,6 +63,11 @@ NMAP_FAST_MAX_RETRIES = 1       # low retries — speed over completeness in pha
 NMAP_SERVICE_MAX_RETRIES = 2    # reduced from 3; catches most services with less wait
 NMAP_SERVICE_VERSION_INTENSITY = 7  # 7 = thorough but not exhaustive (vs --version-all = 9)
 
+# ── Anomaly detection ─────────────────────────────────────────────────────────
+ISOLATION_FOREST_CONTAMINATION = 0.15
+ISOLATION_FOREST_N_ESTIMATORS = 100
+ANOMALY_HIGH_THRESHOLD = 0.65
+
 # ── Reporting ──────────────────────────────────────────────────────────────────
 SCRIPT_OUTPUT_MAX_LENGTH = 140
 PROGRESS_SPINNER_INTERVAL = 0.15

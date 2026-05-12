@@ -3,7 +3,7 @@
 
 import joblib
 import pandas as pd
-from constants import SEVERITY_CRITICAL_MIN_PROB, SEVERITY_HIGH_MIN_PROB, SEVERITY_MEDIUM_MIN_PROB
+from constants import SEVERITY_CRITICAL_MIN_PROB, SEVERITY_HIGH_MIN_PROB, SEVERITY_MEDIUM_MIN_PROB, ANOMALY_HIGH_THRESHOLD
 from alerts import generate_alerts_for_row, alerts_to_summary_string
 from asset_profiler import classify_asset
 from features import records_to_dataframe
@@ -60,6 +60,20 @@ def predict_from_records(records, model_path, output_csv=None):
     else:
         df["predicted_probability_suspicious"] = 0.0
 
+    # Compute unsupervised anomaly scores from Isolation Forest
+    anomaly_detector = bundle.get("anomaly_detector")
+    if anomaly_detector is not None:
+        raw_scores = anomaly_detector.score_samples(X)
+        score_min = float(raw_scores.min())
+        score_max = float(raw_scores.max())
+        if score_max > score_min:
+            normalized = 1.0 - (raw_scores - score_min) / (score_max - score_min)
+        else:
+            normalized = [0.5] * len(raw_scores)
+        df["anomaly_score"] = [round(float(s), 4) for s in normalized]
+    else:
+        df["anomaly_score"] = 0.0
+
     df["severity"] = df["predicted_probability_suspicious"].apply(severity_from_probability)
     df["risk_score"] = (df["predicted_probability_suspicious"] * 100).round(1)
     df["top_risk_ports"] = [risky_ports_from_record(record) for record in records]
@@ -85,6 +99,7 @@ def predict_from_records(records, model_path, output_csv=None):
             "severity",
             "triage_status",
             "asset_type",
+            "anomaly_score",
             "open_port_count",
             "risky_port_count",
             "very_risky_port_count",

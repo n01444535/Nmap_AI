@@ -4,6 +4,7 @@
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 
 
@@ -651,6 +652,28 @@ def command_analyze(xml_path):
     print_suspicious_summary(pred_df)
     print(f"Saved offline analysis snapshot: {snapshot_path}")
 
+# EN: Continuously scan the network at a set interval and report changes.
+# VI: Liên tục quét mạng theo chu kỳ và báo cáo thay đổi.
+def command_monitor(interval_minutes=5):
+    print(f"Monitor mode — scanning every {interval_minutes} minute(s). Press Ctrl+C to stop.\n")
+    scan_count = 0
+    while True:
+        scan_count += 1
+        print(f"[Scan #{scan_count}] {utc_now_iso()}")
+        try:
+            command_full(mode="real", force_rescan=True)
+        except KeyboardInterrupt:
+            raise
+        except Exception as scan_error:
+            print(f"Scan error: {scan_error}")
+        print(f"\nNext scan in {interval_minutes} minute(s). Press Ctrl+C to stop.\n")
+        try:
+            time.sleep(interval_minutes * 60)
+        except KeyboardInterrupt:
+            print("\nMonitor stopped.\n")
+            return
+
+
 # EN: Run the full scan, train, predict, and report flow.
 # VI: Chạy đủ quét, học, đoán, và làm báo cáo.
 def command_full(mode="real", force_rescan=False, skip_unknown_enrich=False):
@@ -965,6 +988,32 @@ def main():
     full_parser.add_argument("--rescan", action="store_true", help="Ignore cached scan data and run Nmap again")
     full_parser.add_argument("--skip-unknown-enrich", action="store_true", help="Skip the targeted second-stage scan for unknown ports")
 
+    monitor_parser = sub.add_parser(
+        "monitor",
+        add_help=False,
+        formatter_class=argparse.RawTextHelpFormatter,
+        help="Continuously scan the network at a set interval",
+        description=(
+            "monitor - run full scans on a repeating interval.\n\n"
+            "Each cycle runs a fresh Nmap scan, trains the model, predicts, and writes reports.\n"
+            "Baseline comparison detects new hosts, new ports, and service version changes each cycle.\n"
+            "Press Ctrl+C at any time to stop."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  python3 main.py monitor\n"
+            "  python3 main.py monitor --interval 10"
+        )
+    )
+    add_help_flags(monitor_parser)
+    monitor_parser.add_argument(
+        "--interval",
+        type=int,
+        default=5,
+        metavar="MINUTES",
+        help="Minutes between scans (default: 5)"
+    )
+
     args = parser.parse_args()
 
     try:
@@ -994,6 +1043,10 @@ def main():
 
         if args.command == "full":
             command_full(args.mode, force_rescan=args.rescan, skip_unknown_enrich=args.skip_unknown_enrich)
+            return
+
+        if args.command == "monitor":
+            command_monitor(interval_minutes=args.interval)
             return
 
     except KeyboardInterrupt as e:

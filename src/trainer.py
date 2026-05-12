@@ -4,6 +4,7 @@
 import json
 import joblib
 import pandas as pd
+from sklearn.ensemble import IsolationForest
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score, precision_score, recall_score
 from sklearn.model_selection import train_test_split
@@ -12,6 +13,7 @@ from constants import (
     MIN_SAMPLES_TO_TRAIN, MIN_SAMPLES_FOR_STRATIFY, MIN_SAMPLES_FOR_LR,
     SMALL_DATASET_ROW_LIMIT, TEST_SPLIT_SMALL_DATASET, TEST_SPLIT_NORMAL_DATASET,
     DT_MAX_DEPTH, DT_MIN_SAMPLES_SPLIT, DT_MIN_SAMPLES_LEAF,
+    ISOLATION_FOREST_CONTAMINATION, ISOLATION_FOREST_N_ESTIMATORS,
 )
 from features import feature_columns
 
@@ -159,11 +161,20 @@ def train_models(train_csv, output_model):
     if best_model is None:
         return None, "All machine learning models failed during training.\n"
 
+    # Train anomaly detector unsupervised on all feature data (no labels needed)
+    anomaly_detector = IsolationForest(
+        contamination=ISOLATION_FOREST_CONTAMINATION,
+        n_estimators=ISOLATION_FOREST_N_ESTIMATORS,
+        random_state=42,
+    )
+    anomaly_detector.fit(X)
+
     bundle = {
         "model_name": best_name,
         "model": best_model,
         "features": X_cols,
-        "metrics": results
+        "metrics": results,
+        "anomaly_detector": anomaly_detector,
     }
 
     joblib.dump(bundle, output_model)
