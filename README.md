@@ -42,12 +42,21 @@ The goal is to close the gap between raw scan data and actionable SOC workflow.
 - Predicts with probability score (0.0–1.0) and severity tier: `LOW` / `MEDIUM` / `HIGH` / `CRITICAL`
 
 ### SOC Analyst Layer
-- **Risk Score (0–100)** derived from model confidence
+- **Composite Risk Score (0–100)** — weighted formula across five signals: ML probability (×40) + alert severity (×30) + anomaly score (×15) + baseline change (×10) + asset criticality (×5)
 - **Structured Alerts** — 25+ named rules fire per host (e.g. `[CRITICAL] Unauthenticated Service Exposed: Redis`, `[HIGH] Multiple Remote Access Vectors Exposed`)
-- **SOC Triage Status** — three action levels based on alert severity and probability:
-  - `Immediate Action` — isolate and begin incident response now
-  - `Investigate` — review service versions and authentication logs
-  - `Monitor` — capture traffic and watch for anomalies
+- **SOC Triage Status** — four action levels based on alert severity and ML probability:
+  - `Immediate Action` — CRITICAL alert or probability > 0.98 — isolate and begin incident response
+  - `Urgent` — HIGH alert or probability > 0.95 — escalate immediately, restrict network access
+  - `Investigate` — MEDIUM alert or probability > 0.85 — review service versions and authentication logs
+  - `Monitor` — suspicious with LOW alerts — capture traffic and watch for anomalies
+- **Network-Level Attack Pattern Detection** — cross-host intelligence layer that identifies network-wide attack campaigns rather than just individual host risk:
+  - `Lateral Movement Campaign` — multiple hosts expose SMB + RDP simultaneously (MITRE TA0008)
+  - `SMB Worm Propagation Conditions` — SMB density sufficient for autonomous worm spread (EternalBlue/WannaCry-style)
+  - `Cleartext Credential Spray Surface` — multiple hosts expose Telnet or FTP network-wide
+  - `Database Exposure Cluster` — multiple database listener ports reachable across hosts
+  - `Container / Orchestration API Cluster` — Docker API or Kubernetes API exposed on multiple hosts
+  - `Remote Access Vector Cluster` — multiple hosts each expose several remote access protocols
+  - `Critical Severity Host Mass` — large concentration of CRITICAL-severity hosts suggests active compromise
 - **Asset Fingerprinting** — classifies each host as: `server`, `workstation`, `database_server`, `file_server`, `container_host`, `printer`, `iot_camera`, `iot_device`, `mail_server`, `network_device`, or `unknown`
 - **Baseline Comparison** — saves a port baseline after each run; subsequent runs detect new hosts, newly opened ports, closed ports, and **service version changes** (e.g. `nginx 1.18` → `nginx 1.24` on port 80)
 - **Isolation Forest Anomaly Detection** — unsupervised second opinion trained on all host feature vectors; produces a 0–1 `anomaly_score` per host to catch unusual profiles the classifier may not flag
@@ -81,10 +90,11 @@ Nmap_AI/
 │   ├── scanner.py             # Nmap subprocess wrapper (two-phase: fast port + targeted service)
 │   ├── parser_nmap.py         # Nmap XML → structured host records
 │   ├── features.py            # Feature engineering → DataFrame (~60 columns per host)
-│   ├── labeling.py            # Heuristic rule-based label assignment (normal/suspicious)
-│   ├── trainer.py             # Model training, F1 selection, feature importance
-│   ├── predictor.py           # Inference: probability, severity, risk score, triage, asset type
-│   ├── triage.py              # SOC triage engine: Immediate Action / Investigate / Monitor
+│   ├── labeling.py            # Heuristic rule-based label assignment + confidence scoring
+│   ├── trainer.py             # Model training, F1 selection, sample weighting, feature importance
+│   ├── predictor.py           # Inference: probability, composite risk score, severity, triage, asset type
+│   ├── triage.py              # SOC triage engine: Immediate Action / Urgent / Investigate / Monitor
+│   ├── network_patterns.py    # Cross-host attack pattern detection (7 MITRE-mapped patterns)
 │   ├── asset_profiler.py      # Device fingerprinting: server, workstation, container_host…
 │   ├── baseline.py            # Baseline save/load/compare for change detection
 │   ├── config_loader.py       # Loads config.yaml — trusted hosts, ignored ports overrides
@@ -292,6 +302,7 @@ Recommendations:
 | `result/prediction_result.txt` | Full triage report — alerts, MITRE mapping, explanations, recommendations, baseline diff |
 | `result/predictions.csv` | Prediction table with probability, risk score, severity, triage status, asset type, anomaly score, alert summary |
 | `result/baseline.json` | Saved port baseline — compared on the next run to detect changes |
+| `result/network_patterns.json` | Cross-host attack patterns detected in the last scan (MITRE-mapped) |
 | `result/port_details.txt` | Per-port detail report with risk level, enrichment data, and remediation |
 | `result/port_details.csv` | Machine-readable port detail table |
 | `result/scan_result.txt` | Human-readable scan summary |
@@ -309,9 +320,10 @@ Recommendations:
 
 | Level | Trigger Condition | Recommended Action |
 |---|---|---|
-| `Immediate Action` | CRITICAL alert OR probability > 0.98 | Isolate host, begin incident response |
-| `Investigate` | HIGH alert OR probability > 0.95 | Review logs, verify service versions |
-| `Monitor` | Suspicious with MEDIUM/LOW alerts | Capture traffic, watch outbound connections |
+| `Immediate Action` | CRITICAL alert OR probability > 0.98 | Isolate host, begin incident response now |
+| `Urgent` | HIGH alert OR probability > 0.95 | Escalate immediately, restrict network access, begin log analysis |
+| `Investigate` | MEDIUM alert OR probability > 0.85 | Review open ports, service versions, and authentication logs |
+| `Monitor` | Suspicious with LOW alerts | Capture traffic, watch for unusual outbound connections |
 
 ---
 
@@ -342,7 +354,7 @@ Recommendations:
 - The ML model trains on heuristic labels derived from the same scan — it learns the rule-based scoring, not real ground truth. This is intentional for a supervised demo with no labeled dataset.
 - Feature extraction is port-based; the model cannot analyze packet payloads or timing behavior.
 - Nmap scan depth depends on network conditions and requires elevated privileges for some scan types.
-- Baseline comparison tracks open ports only — service version changes within the same port are not detected.
+- Baseline comparison detects new/closed ports and service version changes, but not runtime configuration changes (e.g. firewall rule changes that do not affect open ports).
 - No real-time monitoring — this is a point-in-time snapshot tool, not a continuous IDS.
 
 ---
