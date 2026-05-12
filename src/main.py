@@ -57,6 +57,7 @@ from trainer import print_metrics, train_models, write_feature_importance_report
 from unknown_enrichment import enrich_unknown_ports
 from utils import (
     dataframe_to_prediction_text,
+    format_network_patterns,
     ensure_result_dir,
     ensure_data_dir,
     has_nmap,
@@ -66,7 +67,8 @@ from utils import (
     write_txt
 )
 from features import records_to_dataframe
-from labeling import heuristic_label_row
+from labeling import heuristic_label_row, heuristic_confidence_row
+from network_patterns import detect_network_patterns
 
 # EN: Get scan records from cache, Nmap, or sample data.
 # VI: Lấy dữ liệu scan từ cache, Nmap, hoặc dữ liệu mẫu.
@@ -259,6 +261,7 @@ def build_training_data(result_dir, real_records, include_learned=True, remember
 
     train_df = records_to_dataframe(records_for_training)
     train_df["label"] = train_df.apply(heuristic_label_row, axis=1)
+    train_df["label_confidence"] = train_df.apply(heuristic_confidence_row, axis=1)
     needs_augmentation = len(train_df) < 4 or train_df["label"].nunique() < 2
 
     if needs_augmentation:
@@ -266,6 +269,7 @@ def build_training_data(result_dir, real_records, include_learned=True, remember
         sample_records = get_sample_records(local_ip)
         sample_df = records_to_dataframe(sample_records)
         sample_df["label"] = sample_df.apply(heuristic_label_row, axis=1)
+        sample_df["label_confidence"] = sample_df.apply(heuristic_confidence_row, axis=1)
 
         train_df = pd.concat([train_df, sample_df], ignore_index=True)
         train_df = train_df.drop_duplicates().reset_index(drop=True)
@@ -550,9 +554,11 @@ def command_predict():
 
     baseline_diff = compare_to_baseline(records, baseline_path)
     write_port_details(records, str(result_dir / "port_details.csv"), str(result_dir / "port_details.txt"))
-    df = predict_from_records(records, model_path, output_csv)
+    df = predict_from_records(records, model_path, output_csv, baseline_diff=baseline_diff)
     df = override_trusted_predictions(df, config)
-    write_txt(dataframe_to_prediction_text(df, baseline_diff=baseline_diff), output_txt)
+    patterns = detect_network_patterns(df)
+    save_json(patterns, str(result_dir / "network_patterns.json"))
+    write_txt(dataframe_to_prediction_text(df, baseline_diff=baseline_diff, network_patterns=patterns), output_txt)
     save_baseline(records, baseline_path)
     print_suspicious_summary(df)
 
@@ -635,9 +641,11 @@ def command_analyze(xml_path):
     records = apply_config_to_records(records, config)
     baseline_path = str(result_dir / "baseline.json")
     baseline_diff = compare_to_baseline(records, baseline_path)
-    pred_df = predict_from_records(records, output_model, output_csv)
+    pred_df = predict_from_records(records, output_model, output_csv, baseline_diff=baseline_diff)
     pred_df = override_trusted_predictions(pred_df, config)
-    write_txt(dataframe_to_prediction_text(pred_df, baseline_diff=baseline_diff), output_txt)
+    patterns = detect_network_patterns(pred_df)
+    save_json(patterns, str(result_dir / "network_patterns.json"))
+    write_txt(dataframe_to_prediction_text(pred_df, baseline_diff=baseline_diff, network_patterns=patterns), output_txt)
     save_baseline(records, baseline_path)
     snapshot_path = save_full_result_snapshot(
         result_dir,
@@ -772,9 +780,11 @@ def command_full(mode="real", force_rescan=False, skip_unknown_enrich=False):
 
         return
 
-    pred_df = predict_from_records(records, output_model, output_csv)
+    pred_df = predict_from_records(records, output_model, output_csv, baseline_diff=baseline_diff)
     pred_df = override_trusted_predictions(pred_df, config)
-    write_txt(dataframe_to_prediction_text(pred_df, baseline_diff=baseline_diff), output_txt)
+    patterns = detect_network_patterns(pred_df)
+    save_json(patterns, str(result_dir / "network_patterns.json"))
+    write_txt(dataframe_to_prediction_text(pred_df, baseline_diff=baseline_diff, network_patterns=patterns), output_txt)
     save_baseline(records, baseline_path)
     snapshot_path = save_full_result_snapshot(
         result_dir,

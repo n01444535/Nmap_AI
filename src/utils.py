@@ -263,6 +263,32 @@ def severity_from_probability(p):
         return "MEDIUM"
     return "LOW"
 
+# EN: Format detected network-level attack patterns as a text block for the report.
+# VI: Định dạng các mẫu tấn công liên máy phát hiện được thành khối chữ cho báo cáo.
+def format_network_patterns(detected_patterns):
+    if not detected_patterns:
+        return ""
+    lines = []
+    lines.append("================ NETWORK-LEVEL ATTACK PATTERNS ============\n\n")
+    for pattern_index, pattern in enumerate(detected_patterns, 1):
+        lines.append(f"[{pattern_index}] [{pattern['severity']}] {pattern['name']}\n")
+        lines.append(f"    Affected hosts ({pattern['affected_count']}):\n")
+        for host_entry in pattern["affected_hosts"]:
+            host_label = (
+                f"{host_entry['ip']} ({host_entry['hostname']})"
+                if host_entry.get("hostname")
+                else host_entry["ip"]
+            )
+            lines.append(f"      - {host_label}\n")
+        lines.append(f"    {pattern['description']}\n")
+        if pattern.get("mitre"):
+            lines.append(f"    MITRE: {pattern['mitre']}\n")
+        lines.append(f"    Recommendation: {pattern['recommendation']}\n")
+        lines.append("\n")
+    lines.append("==========================================================\n\n")
+    return "".join(lines)
+
+
 # EN: Format the baseline comparison diff as a readable text block.
 # VI: Định dạng kết quả so sánh baseline thành khối chữ dễ đọc.
 def _format_baseline_diff(diff):
@@ -328,17 +354,21 @@ def _format_baseline_diff(diff):
 
 # EN: Turn predictions into the final text report.
 # VI: Đổi kết quả dự đoán thành báo cáo chữ cuối.
-def dataframe_to_prediction_text(df, baseline_diff=None):
+def dataframe_to_prediction_text(df, baseline_diff=None, network_patterns=None):
     lines = []
 
     total = len(df)
     suspicious_df = df[df["prediction"] == "suspicious"]
     normal_df = df[df["prediction"] == "normal"]
 
+    critical_count = int((df["severity"] == "CRITICAL").sum()) if "severity" in df.columns else 0
+    high_count = int((df["severity"] == "HIGH").sum()) if "severity" in df.columns else 0
+
     lines.append("================ NETWORK SECURITY ANALYSIS ================\n")
     lines.append(f"Total Hosts Scanned: {total}\n")
     lines.append(f"Normal Hosts: {len(normal_df)}\n")
-    lines.append(f"Suspicious Hosts: {len(suspicious_df)}\n\n")
+    lines.append(f"Suspicious Hosts: {len(suspicious_df)}\n")
+    lines.append(f"Critical: {critical_count}  |  High: {high_count}\n\n")
 
     if not suspicious_df.empty:
         top = suspicious_df.sort_values(
@@ -346,17 +376,20 @@ def dataframe_to_prediction_text(df, baseline_diff=None):
             ascending=False
         ).head(3)
 
-        lines.append("Top Suspicious Hosts:\n")
+        lines.append("Top Risks:\n")
         for i, (_, row) in enumerate(top.iterrows(), 1):
             sev = severity_from_probability(row["predicted_probability_suspicious"])
             triage = row.get("triage_status", "")
             triage_str = f" [{triage}]" if triage and triage != "—" else ""
-            lines.append(f"{i}. {row['ip']} ({row['hostname']}) - {sev}{triage_str}\n")
+            lines.append(f"{i}. {row['ip']} ({row['hostname']}) — {sev}{triage_str}\n")
 
     lines.append("\n==========================================================\n\n")
 
     if baseline_diff is not None:
         lines.extend(_format_baseline_diff(baseline_diff))
+
+    if network_patterns:
+        lines.append(format_network_patterns(network_patterns))
 
     lines.append("-------------------- HOST ANALYSIS ------------------------\n\n")
     lines.append(

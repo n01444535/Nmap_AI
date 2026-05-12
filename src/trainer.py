@@ -87,6 +87,7 @@ def train_models(train_csv, output_model):
     X_cols = feature_columns(df)
     X = df[X_cols]
     y = df["label"].astype(str)
+    label_confidence_series = df["label_confidence"] if "label_confidence" in df.columns else None
 
     use_stratify = y.value_counts().min() >= MIN_SAMPLES_FOR_STRATIFY
     stratify_value = y if use_stratify else None
@@ -110,6 +111,10 @@ def train_models(train_csv, output_model):
     if len(set(y_train)) < 2:
         return None, "Training split contains only one class, so machine learning training was skipped.\n"
 
+    sample_weights_train = None
+    if label_confidence_series is not None:
+        sample_weights_train = label_confidence_series.loc[X_train.index].values
+
     candidate_models = []
 
     if len(df) >= MIN_SAMPLES_FOR_LR:
@@ -128,7 +133,7 @@ def train_models(train_csv, output_model):
 
     for name, model in candidate_models:
         try:
-            model.fit(X_train, y_train)
+            model.fit(X_train, y_train, sample_weight=sample_weights_train)
             preds = model.predict(X_test)
 
             acc = accuracy_score(y_test, preds)

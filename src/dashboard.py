@@ -21,8 +21,9 @@ SEVERITY_COLORS = {
 
 TRIAGE_COLORS = {
     "Immediate Action": "#dc3545",
-    "Investigate":      "#fd7e14",
-    "Monitor":          "#ffc107",
+    "Urgent":           "#fd7e14",
+    "Investigate":      "#ffc107",
+    "Monitor":          "#17a2b8",
 }
 
 st.set_page_config(
@@ -82,6 +83,15 @@ def load_feature_importance():
     if not path.exists():
         return None
     return path.read_text(encoding="utf-8")
+
+
+@st.cache_data(ttl=30)
+def load_network_patterns():
+    path = RESULT_DIR / "network_patterns.json"
+    if not path.exists():
+        return None
+    with open(path, encoding="utf-8") as patterns_file:
+        return json.load(patterns_file)
 
 
 df, last_update = load_predictions()
@@ -244,6 +254,31 @@ else:
         st.dataframe(styled, use_container_width=True)
     else:
         st.dataframe(table_df, use_container_width=True)
+
+st.divider()
+
+# ── Network Attack Patterns ───────────────────────────────────────────────────
+st.subheader("Network-Level Attack Patterns")
+pattern_data = load_network_patterns()
+if pattern_data is None:
+    st.info("No pattern data found. Run `python3 src/main.py full` to generate.")
+elif not pattern_data:
+    st.success("No cross-host attack patterns detected in the last scan.")
+else:
+    st.caption(f"{len(pattern_data)} pattern(s) detected across the network.")
+    for detected_pattern in pattern_data:
+        severity_color = SEVERITY_COLORS.get(detected_pattern["severity"], "#999")
+        pattern_header = f"[{detected_pattern['severity']}] {detected_pattern['name']} — {detected_pattern['affected_count']} host(s)"
+        with st.expander(pattern_header):
+            st.markdown(f"**Description:** {detected_pattern['description']}")
+            if detected_pattern.get("mitre"):
+                st.markdown(f"**MITRE:** `{detected_pattern['mitre']}`")
+            st.markdown(f"**Recommendation:** {detected_pattern['recommendation']}")
+            host_rows = [
+                {"ip": host_entry["ip"], "hostname": host_entry.get("hostname", "")}
+                for host_entry in detected_pattern["affected_hosts"]
+            ]
+            st.dataframe(pd.DataFrame(host_rows), use_container_width=True)
 
 st.divider()
 
